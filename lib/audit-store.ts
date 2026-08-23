@@ -24,6 +24,7 @@ type FallbackCheckout = {
   id: number;
   checkoutId: string;
   merchantId: string;
+  customerId: string | null;
   customerEmail: string | null;
   orderNumber: string | null;
   sessionId: string;
@@ -115,6 +116,7 @@ export async function listRecentAudit(limit = 60, merchantId = DEMO_MERCHANT_ID)
 export async function saveCheckout(input: {
   checkoutId: string;
   merchantId?: string;
+  customerId?: string;
   customerEmail?: string;
   orderNumber?: string;
   sessionId: string;
@@ -134,12 +136,31 @@ export async function saveCheckout(input: {
       id: fallbackCheckouts.length + 1,
       ...input,
       merchantId: input.merchantId ?? DEMO_MERCHANT_ID,
+      customerId: input.customerId ?? null,
       customerEmail: input.customerEmail ?? null,
       orderNumber: input.orderNumber ?? null,
       providerReference: input.providerReference ?? null,
       createdAt: new Date().toISOString(),
     });
     return false;
+  }
+}
+
+export async function listCheckoutsForCustomer(customerId: string, limit = 50) {
+  try {
+    await ensureRuntimeSchema();
+    const db = getDb();
+    return await db
+      .select()
+      .from(checkoutEvents)
+      .where(eq(checkoutEvents.customerId, customerId))
+      .orderBy(desc(checkoutEvents.id))
+      .limit(Math.min(Math.max(limit, 1), 100));
+  } catch {
+    return fallbackCheckouts
+      .filter((order) => order.customerId === customerId)
+      .slice(-Math.min(Math.max(limit, 1), 100))
+      .reverse();
   }
 }
 

@@ -40,6 +40,7 @@ export async function POST(request: Request) {
   const tags = Array.isArray(body.tags)
     ? body.tags.filter((tag): tag is string => typeof tag === "string").slice(0, 10)
     : category.toLowerCase().split(/\s+/);
+  const imageUrl = typeof body.imageUrl === "string" && /^https:\/\/\S+$/.test(body.imageUrl.trim()) ? body.imageUrl.trim() : null;
   const product = await createProduct({
     name,
     category,
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
     rating: 4.5,
     tags,
     accent: ["lime", "blue", "orange", "violet"][Math.floor(Math.random() * 4)],
+    imageUrl,
   }, actor.merchantId);
   await saveAudit({ merchantId: actor.merchantId, sessionId: `catalogue_${product.id}`, eventType: "catalogue.product_created", detail: `${product.name} created by ${actor.email}`, engine: "system" });
   return Response.json({ product }, { status: 201 });

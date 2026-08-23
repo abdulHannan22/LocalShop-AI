@@ -698,6 +698,19 @@ button { cursor: pointer; }
 .store-intent strong { color: #356141; font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
 .store-intent p { margin: 6px 0 0 !important; font-size: 10px !important; }
 .store-error { max-width: 760px; margin-top: 12px; padding: 11px; border: 1px solid #efc5bf; border-radius: 9px; background: #fff4f2; color: #8b332a; font-size: 10px; }
+.store-account-toggle { padding: 7px 14px; border: 1px solid #dce4d8; border-radius: 999px; background: #fff; color: var(--ink); font-size: 10px; font-weight: 800; cursor: pointer; }
+.store-account-panel { padding: 20px clamp(20px, 6vw, 80px); border-bottom: 1px solid var(--line); background: #f7f8f4; }
+.store-account-panel form { display: flex; gap: 8px; max-width: 420px; flex-wrap: wrap; }
+.store-account-panel input { min-width: 0; flex: 1; height: 40px; padding: 0 12px; border: 1px solid #e2e7df; border-radius: 10px; font-size: 11px; }
+.store-account-panel form button { height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: var(--forest); color: #fff; font-size: 10px; font-weight: 800; cursor: pointer; }
+.store-account-message { margin: 10px 0 0; font-size: 10px; color: #356141; }
+.store-account-header { display: flex; justify-content: space-between; align-items: center; max-width: 500px; margin-bottom: 10px; }
+.store-account-header button { padding: 6px 12px; border: 1px solid #dce4d8; border-radius: 8px; background: #fff; font-size: 9px; font-weight: 800; cursor: pointer; }
+.store-order-list { display: grid; gap: 8px; max-width: 500px; padding: 0; margin: 8px 0 0; list-style: none; }
+.store-order-list li { display: flex; justify-content: space-between; padding: 10px 12px; border: 1px solid #e2e7df; border-radius: 10px; background: #fff; font-size: 10px; }
+.store-order-list li > div:first-child { display: grid; gap: 2px; }
+.store-order-list li > div:last-child { text-align: right; display: grid; gap: 2px; }
+.store-order-list li em { color: #667169; font-style: normal; }
 .store-products { padding: 54px clamp(20px, 8vw, 110px) 70px; }
 .store-section-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-end; margin-bottom: 22px; }
 .store-section-heading h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
@@ -705,7 +718,9 @@ button { cursor: pointer; }
 .store-product-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
 .store-product-grid article { overflow: hidden; border: 1px solid #dfe5dc; border-radius: 17px; background: #fff; transition: .16s ease; }
 .store-product-grid article.chosen { border-color: #4f805c; box-shadow: 0 0 0 3px rgba(79,128,92,.12); }
-.store-product-art { min-height: 110px; display: flex; justify-content: space-between; align-items: flex-start; padding: 13px; }
+.store-product-art { position: relative; min-height: 110px; display: flex; justify-content: space-between; align-items: flex-start; padding: 13px; overflow: hidden; }
+.store-product-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+.store-product-art span, .store-product-art b { position: relative; z-index: 1; }
 .store-product-art.lime { background: #dff4a7; }
 .store-product-art.blue { background: #cde4f3; }
 .store-product-art.orange { background: #f3d2b5; }
@@ -868,7 +883,9 @@ button { cursor: pointer; }
 .product-form button { align-self: end; height: 39px; border: 0; border-radius: 9px; background: var(--forest); color: #fff; font-size: 10px; font-weight: 900; }
 .catalogue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .catalogue-card { overflow: hidden; border: 1px solid #e0e5dd; border-radius: 15px; background: #fff; }
-.catalogue-swatch { min-height: 75px; padding: 12px; display: flex; justify-content: space-between; align-items: flex-start; }
+.catalogue-swatch { position: relative; min-height: 75px; padding: 12px; display: flex; justify-content: space-between; align-items: flex-start; overflow: hidden; }
+.catalogue-swatch img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+.catalogue-swatch span, .catalogue-swatch b { position: relative; z-index: 1; }
 .catalogue-swatch.lime { background: #dff4a7; }
 .catalogue-swatch.blue { background: #cde4f3; }
 .catalogue-swatch.orange { background: #f3d2b5; }
