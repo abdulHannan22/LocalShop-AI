@@ -35,6 +35,7 @@ function rowToProduct(row: typeof products.$inferSelect): CatalogProduct {
     description: row.description,
     tags,
     accent: row.accent,
+    imageUrl: row.imageUrl ?? null,
   };
 }
 

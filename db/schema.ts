@@ -59,6 +59,7 @@ export const products = sqliteTable(
     description: text("description").notNull(),
     tags: text("tags").notNull().default("[]"),
     accent: text("accent").notNull().default("lime"),
+    imageUrl: text("image_url"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -104,6 +105,7 @@ export const checkoutEvents = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     checkoutId: text("checkout_id").notNull().unique(),
     merchantId: text("merchant_id").notNull().default("merchant_nova"),
+    customerId: text("customer_id"),
     customerEmail: text("customer_email"),
     orderNumber: text("order_number"),
     sessionId: text("session_id").notNull(),
@@ -114,5 +116,34 @@ export const checkoutEvents = sqliteTable(
     status: text("status").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [index("checkout_merchant_idx").on(table.merchantId)],
+  (table) => [
+    index("checkout_merchant_idx").on(table.merchantId),
+    index("checkout_customer_idx").on(table.customerId),
+  ],
+);
+
+export const customers = sqliteTable(
+  "customers",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    name: text("name"),
+    status: text("status").notNull().default("active"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("customer_email_idx").on(table.email)],
+);
+
+export const customerOtps = sqliteTable(
+  "customer_otps",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    consumed: integer("consumed").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("customer_otp_email_idx").on(table.email)],
 );

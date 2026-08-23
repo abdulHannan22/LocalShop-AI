@@ -16,6 +16,7 @@ export type CatalogProduct = {
   description: string;
   tags: string[];
   accent: string;
+  imageUrl?: string | null;
 };
 
 export type RankedProduct = CatalogProduct & {

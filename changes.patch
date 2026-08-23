@@ -1,0 +1,842 @@
+diff --git a/.env.example b/.env.example
+index 843a12b..a99b541 100644
+--- a/.env.example
++++ b/.env.example
+@@ -10,6 +10,15 @@ RAZORPAY_WEBHOOK_SECRET=
+ # The first authenticated user can bootstrap the initial owner/admin account.
+ PLATFORM_ADMIN_EMAILS=
+ 
++# Customer sign-in (email OTP). Without RESEND_API_KEY the app runs in safe
++# local/demo mode: the OTP is returned directly in the API response instead
++# of being emailed, so sign-in still works without paid credentials.
++RESEND_API_KEY=
++TRANSACTIONAL_EMAIL_FROM=LocalShop AI <onboarding@resend.dev>
++# Secret used to sign customer session cookies. Set a long random value in
++# production; a fixed development default is used if left blank locally.
++CUSTOMER_SESSION_SECRET=
++
+ # Local development identity only; hosted production uses verified user headers.
+ DEV_USER_EMAIL=owner@nova.local
+ DEV_USER_NAME=Nova Store Owner
+diff --git a/app/api/catalog/[id]/route.ts b/app/api/catalog/[id]/route.ts
+index acf0f14..d3b6987 100644
+--- a/app/api/catalog/[id]/route.ts
++++ b/app/api/catalog/[id]/route.ts
+@@ -30,7 +30,7 @@ export async function PATCH(
+       : Response.json({ error: "Product not found." }, { status: 404 });
+   }
+ 
+-  const patch: Record<string, string | number | string[]> = {};
++  const patch: Record<string, string | number | string[] | null> = {};
+   for (const key of ["name", "category", "description", "accent"] as const) {
+     if (typeof body[key] === "string" && body[key].trim()) patch[key] = body[key].trim();
+   }
+@@ -39,6 +39,9 @@ export async function PATCH(
+     if (Number.isFinite(value) && value >= 0) patch[key] = value;
+   }
+   if (Array.isArray(body.tags)) patch.tags = body.tags.filter((tag): tag is string => typeof tag === "string").slice(0, 10);
++  if (typeof body.imageUrl === "string") {
++    patch.imageUrl = /^https:\/\/\S+$/.test(body.imageUrl.trim()) ? body.imageUrl.trim() : null;
++  }
+ 
+   if (!can(actor, "catalogue:write")) return Response.json({ error: "Catalogue-write permission is required." }, { status: 403 });
+   const product = await updateProduct(id, patch, actor.merchantId);
+diff --git a/app/api/catalog/route.ts b/app/api/catalog/route.ts
+index 981abf0..eb659e5 100644
+--- a/app/api/catalog/route.ts
++++ b/app/api/catalog/route.ts
+@@ -40,6 +40,7 @@ export async function POST(request: Request) {
+   const tags = Array.isArray(body.tags)
+     ? body.tags.filter((tag): tag is string => typeof tag === "string").slice(0, 10)
+     : category.toLowerCase().split(/\s+/);
++  const imageUrl = typeof body.imageUrl === "string" && /^https:\/\/\S+$/.test(body.imageUrl.trim()) ? body.imageUrl.trim() : null;
+   const product = await createProduct({
+     name,
+     category,
+@@ -49,6 +50,7 @@ export async function POST(request: Request) {
+     rating: 4.5,
+     tags,
+     accent: ["lime", "blue", "orange", "violet"][Math.floor(Math.random() * 4)],
++    imageUrl,
+   }, actor.merchantId);
+   await saveAudit({ merchantId: actor.merchantId, sessionId: `catalogue_${product.id}`, eventType: "catalogue.product_created", detail: `${product.name} created by ${actor.email}`, engine: "system" });
+   return Response.json({ product }, { status: 201 });
+diff --git a/app/api/checkout/route.ts b/app/api/checkout/route.ts
+index 3617832..b2a7c1f 100644
+--- a/app/api/checkout/route.ts
++++ b/app/api/checkout/route.ts
+@@ -2,6 +2,7 @@ import { saveAudit, saveCheckout } from "../../../lib/audit-store";
+ import { getStoredProduct } from "../../../lib/product-store";
+ import { getRuntimeValue } from "../../../lib/runtime-env";
+ import { getActor, resolveMerchantBySlug } from "../../../lib/authz";
++import { resolveCustomer } from "../../../lib/customer-auth";
+ 
+ type RazorpayPaymentLink = {
+   id?: string;
+@@ -50,6 +51,12 @@ export async function POST(request: Request) {
+     return Response.json({ error: "The selected product is unavailable." }, { status: 404 });
+   }
+ 
++  // Guest checkout stays supported; a signed-in customer just gets the
++  // order attached to their account so it shows up in order history.
++  const customer = await resolveCustomer(request);
++  const customerId = customer?.id;
++  const customerEmail = customer?.email ?? payload.customerEmail;
++
+   const checkoutId = crypto.randomUUID();
+   const orderNumber = `LSA-${Date.now().toString(36).toUpperCase()}`;
+   const amountPaise = product.price * 100;
+@@ -60,7 +67,8 @@ export async function POST(request: Request) {
+     await saveCheckout({
+       checkoutId,
+       merchantId: merchant.id,
+-      customerEmail: payload.customerEmail,
++      customerId,
++      customerEmail,
+       orderNumber,
+       sessionId,
+       productId,
+@@ -130,7 +138,8 @@ export async function POST(request: Request) {
+   await saveCheckout({
+     checkoutId,
+     merchantId: merchant.id,
+-    customerEmail: payload.customerEmail,
++    customerId,
++    customerEmail,
+     orderNumber,
+     sessionId,
+     productId,
+diff --git a/app/api/customer/auth/request/route.ts b/app/api/customer/auth/request/route.ts
+new file mode 100644
+index 0000000..27d5f45
+--- /dev/null
++++ b/app/api/customer/auth/request/route.ts
+@@ -0,0 +1,29 @@
++import { requestCustomerOtp } from "../../../../../lib/customer-auth";
++
++const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
++
++export async function POST(request: Request) {
++  let payload: { email?: string };
++  try {
++    payload = (await request.json()) as typeof payload;
++  } catch {
++    return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
++  }
++
++  const email = payload.email?.trim() ?? "";
++  if (!EMAIL_PATTERN.test(email)) {
++    return Response.json({ error: "Enter a valid email address." }, { status: 400 });
++  }
++
++  const result = await requestCustomerOtp(email);
++
++  return Response.json({
++    message: result.sent
++      ? "We sent a 6-digit code to your email."
++      : "Local demo mode: no email provider configured, so here is your code directly.",
++    // Only present when no transactional email provider (RESEND_API_KEY) is
++    // configured — mirrors the app's existing "safe simulation" behaviour
++    // for Razorpay when live credentials are absent.
++    devCode: result.devCode,
++  });
++}
+diff --git a/app/api/customer/auth/verify/route.ts b/app/api/customer/auth/verify/route.ts
+new file mode 100644
+index 0000000..6a64c81
+--- /dev/null
++++ b/app/api/customer/auth/verify/route.ts
+@@ -0,0 +1,27 @@
++import { customerSessionCookieHeader, signCustomerSession, verifyCustomerOtp } from "../../../../../lib/customer-auth";
++
++export async function POST(request: Request) {
++  let payload: { email?: string; code?: string };
++  try {
++    payload = (await request.json()) as typeof payload;
++  } catch {
++    return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
++  }
++
++  const email = payload.email?.trim() ?? "";
++  const code = payload.code?.trim() ?? "";
++  if (!email || !/^\d{6}$/.test(code)) {
++    return Response.json({ error: "Enter the 6-digit code sent to your email." }, { status: 400 });
++  }
++
++  const customer = await verifyCustomerOtp(email, code);
++  if (!customer) {
++    return Response.json({ error: "That code is invalid or has expired." }, { status: 401 });
++  }
++
++  const { token, maxAge } = await signCustomerSession(customer.id);
++  return Response.json(
++    { customer },
++    { headers: { "Set-Cookie": customerSessionCookieHeader(token, maxAge) } },
++  );
++}
+diff --git a/app/api/customer/logout/route.ts b/app/api/customer/logout/route.ts
+new file mode 100644
+index 0000000..74aff8b
+--- /dev/null
++++ b/app/api/customer/logout/route.ts
+@@ -0,0 +1,5 @@
++import { clearCustomerSessionCookieHeader } from "../../../../lib/customer-auth";
++
++export async function POST() {
++  return Response.json({ ok: true }, { headers: { "Set-Cookie": clearCustomerSessionCookieHeader() } });
++}
+diff --git a/app/api/customer/me/route.ts b/app/api/customer/me/route.ts
+new file mode 100644
+index 0000000..4dec0b1
+--- /dev/null
++++ b/app/api/customer/me/route.ts
+@@ -0,0 +1,8 @@
++import { resolveCustomer } from "../../../../lib/customer-auth";
++
++export async function GET(request: Request) {
++  const customer = await resolveCustomer(request);
++  return customer
++    ? Response.json({ customer })
++    : Response.json({ error: "Not signed in." }, { status: 401 });
++}
+diff --git a/app/api/customer/orders/route.ts b/app/api/customer/orders/route.ts
+new file mode 100644
+index 0000000..3e20c68
+--- /dev/null
++++ b/app/api/customer/orders/route.ts
+@@ -0,0 +1,50 @@
++import { inArray } from "drizzle-orm";
++import { getDb } from "../../../../db";
++import { merchants, products } from "../../../../db/schema";
++import { listCheckoutsForCustomer } from "../../../../lib/audit-store";
++import { resolveCustomer } from "../../../../lib/customer-auth";
++
++export async function GET(request: Request) {
++  const customer = await resolveCustomer(request);
++  if (!customer) {
++    return Response.json({ error: "Sign in to view your orders." }, { status: 401 });
++  }
++
++  const orders = await listCheckoutsForCustomer(customer.id);
++
++  // Best-effort enrichment with product/store names; falls back to bare
++  // order data (still fully usable) if D1 is unavailable.
++  let productNames = new Map<number, string>();
++  let merchantNames = new Map<string, { name: string; slug: string }>();
++  try {
++    const db = getDb();
++    const productIds = [...new Set(orders.map((order) => order.productId))];
++    const merchantIds = [...new Set(orders.map((order) => order.merchantId))];
++    if (productIds.length) {
++      const rows = await db.select({ id: products.id, name: products.name }).from(products).where(inArray(products.id, productIds));
++      productNames = new Map(rows.map((row) => [row.id, row.name]));
++    }
++    if (merchantIds.length) {
++      const rows = await db.select({ id: merchants.id, name: merchants.name, slug: merchants.slug }).from(merchants).where(inArray(merchants.id, merchantIds));
++      merchantNames = new Map(rows.map((row) => [row.id, { name: row.name, slug: row.slug }]));
++    }
++  } catch {
++    // fallback mode — leave names blank, the client shows the order number instead
++  }
++
++  const enriched = orders.map((order) => ({
++    checkoutId: order.checkoutId,
++    orderNumber: order.orderNumber,
++    productId: order.productId,
++    productName: productNames.get(order.productId) ?? null,
++    merchantId: order.merchantId,
++    storeName: merchantNames.get(order.merchantId)?.name ?? null,
++    storeSlug: merchantNames.get(order.merchantId)?.slug ?? null,
++    amountPaise: order.amountPaise,
++    provider: order.provider,
++    status: order.status,
++    createdAt: order.createdAt,
++  }));
++
++  return Response.json({ customer, orders: enriched });
++}
+diff --git a/app/globals.css b/app/globals.css
+index 5b37e82..2955689 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -698,6 +698,19 @@ button { cursor: pointer; }
+ .store-intent strong { color: #356141; font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
+ .store-intent p { margin: 6px 0 0 !important; font-size: 10px !important; }
+ .store-error { max-width: 760px; margin-top: 12px; padding: 11px; border: 1px solid #efc5bf; border-radius: 9px; background: #fff4f2; color: #8b332a; font-size: 10px; }
++.store-account-toggle { padding: 7px 14px; border: 1px solid #dce4d8; border-radius: 999px; background: #fff; color: var(--ink); font-size: 10px; font-weight: 800; cursor: pointer; }
++.store-account-panel { padding: 20px clamp(20px, 6vw, 80px); border-bottom: 1px solid var(--line); background: #f7f8f4; }
++.store-account-panel form { display: flex; gap: 8px; max-width: 420px; flex-wrap: wrap; }
++.store-account-panel input { min-width: 0; flex: 1; height: 40px; padding: 0 12px; border: 1px solid #e2e7df; border-radius: 10px; font-size: 11px; }
++.store-account-panel form button { height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: var(--forest); color: #fff; font-size: 10px; font-weight: 800; cursor: pointer; }
++.store-account-message { margin: 10px 0 0; font-size: 10px; color: #356141; }
++.store-account-header { display: flex; justify-content: space-between; align-items: center; max-width: 500px; margin-bottom: 10px; }
++.store-account-header button { padding: 6px 12px; border: 1px solid #dce4d8; border-radius: 8px; background: #fff; font-size: 9px; font-weight: 800; cursor: pointer; }
++.store-order-list { display: grid; gap: 8px; max-width: 500px; padding: 0; margin: 8px 0 0; list-style: none; }
++.store-order-list li { display: flex; justify-content: space-between; padding: 10px 12px; border: 1px solid #e2e7df; border-radius: 10px; background: #fff; font-size: 10px; }
++.store-order-list li > div:first-child { display: grid; gap: 2px; }
++.store-order-list li > div:last-child { text-align: right; display: grid; gap: 2px; }
++.store-order-list li em { color: #667169; font-style: normal; }
+ .store-products { padding: 54px clamp(20px, 8vw, 110px) 70px; }
+ .store-section-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-end; margin-bottom: 22px; }
+ .store-section-heading h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
+@@ -705,7 +718,9 @@ button { cursor: pointer; }
+ .store-product-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
+ .store-product-grid article { overflow: hidden; border: 1px solid #dfe5dc; border-radius: 17px; background: #fff; transition: .16s ease; }
+ .store-product-grid article.chosen { border-color: #4f805c; box-shadow: 0 0 0 3px rgba(79,128,92,.12); }
+-.store-product-art { min-height: 110px; display: flex; justify-content: space-between; align-items: flex-start; padding: 13px; }
++.store-product-art { position: relative; min-height: 110px; display: flex; justify-content: space-between; align-items: flex-start; padding: 13px; overflow: hidden; }
++.store-product-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
++.store-product-art span, .store-product-art b { position: relative; z-index: 1; }
+ .store-product-art.lime { background: #dff4a7; }
+ .store-product-art.blue { background: #cde4f3; }
+ .store-product-art.orange { background: #f3d2b5; }
+@@ -868,7 +883,9 @@ button { cursor: pointer; }
+ .product-form button { align-self: end; height: 39px; border: 0; border-radius: 9px; background: var(--forest); color: #fff; font-size: 10px; font-weight: 900; }
+ .catalogue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+ .catalogue-card { overflow: hidden; border: 1px solid #e0e5dd; border-radius: 15px; background: #fff; }
+-.catalogue-swatch { min-height: 75px; padding: 12px; display: flex; justify-content: space-between; align-items: flex-start; }
++.catalogue-swatch { position: relative; min-height: 75px; padding: 12px; display: flex; justify-content: space-between; align-items: flex-start; overflow: hidden; }
++.catalogue-swatch img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
++.catalogue-swatch span, .catalogue-swatch b { position: relative; z-index: 1; }
+ .catalogue-swatch.lime { background: #dff4a7; }
+ .catalogue-swatch.blue { background: #cde4f3; }
+ .catalogue-swatch.orange { background: #f3d2b5; }
+diff --git a/app/localshop-workspace.tsx b/app/localshop-workspace.tsx
+index e16f789..4e97061 100644
+--- a/app/localshop-workspace.tsx
++++ b/app/localshop-workspace.tsx
+@@ -167,7 +167,7 @@ export function LocalShopWorkspace() {
+   const [status, setStatus] = useState<IntegrationStatus | null>(null);
+   const [staff, setStaff] = useState<StaffRow[]>([]);
+   const [staffInvite, setStaffInvite] = useState({ email: "", role: "sales_agent" as StaffRow["role"] });
+-  const [newProduct, setNewProduct] = useState({ name: "", category: "", price: "", inventory: "", description: "" });
++  const [newProduct, setNewProduct] = useState({ name: "", category: "", price: "", inventory: "", description: "", imageUrl: "" });
+ 
+   const selectedProduct = results.find((item) => item.id === selectedId) ?? null;
+ 
+@@ -295,7 +295,7 @@ export function LocalShopWorkspace() {
+         }),
+       });
+       setCatalogueProducts((items) => [...items, payload.product]);
+-      setNewProduct({ name: "", category: "", price: "", inventory: "", description: "" });
++      setNewProduct({ name: "", category: "", price: "", inventory: "", description: "", imageUrl: "" });
+       setShowProductForm(false);
+       setNotice(`${payload.product.name} added to the live catalogue`);
+     } catch (requestError) {
+@@ -386,7 +386,7 @@ export function LocalShopWorkspace() {
+   }
+ 
+   function renderCatalogue() {
+-    return <section className="admin-view"><div className="view-toolbar"><div><h2>Product catalogue</h2><p>Stock changes immediately affect recommendations and checkout validation.</p></div><button className="primary-action" type="button" onClick={() => setShowProductForm((value) => !value)}>{showProductForm ? "Close form" : "+ Add product"}</button></div>{showProductForm && <form className="product-form" onSubmit={addProduct}><label>Product name<input required value={newProduct.name} onChange={(event) => setNewProduct({ ...newProduct, name: event.target.value })} /></label><label>Category<input required value={newProduct.category} onChange={(event) => setNewProduct({ ...newProduct, category: event.target.value })} /></label><label>Price (₹)<input required min="1" type="number" value={newProduct.price} onChange={(event) => setNewProduct({ ...newProduct, price: event.target.value })} /></label><label>Opening stock<input required min="0" type="number" value={newProduct.inventory} onChange={(event) => setNewProduct({ ...newProduct, inventory: event.target.value })} /></label><label className="wide-field">Description<input required value={newProduct.description} onChange={(event) => setNewProduct({ ...newProduct, description: event.target.value })} /></label><button type="submit">Save product</button></form>}{error && <div className="admin-error" role="alert">{error}</div>}{viewLoading ? <div className="view-loading">Loading catalogue…</div> : <div className="catalogue-grid">{catalogueProducts.map((product) => <article className="catalogue-card" key={product.id}><div className={`catalogue-swatch ${product.accent}`}><span>{product.category}</span><b>#{product.id}</b></div><div className="catalogue-copy"><div><h3>{product.name}</h3><strong>{formatPrice(product.price)}</strong></div><p>{product.description}</p><div className="catalogue-meta"><span>★ {product.rating}</span><span className={product.inventory < 10 ? "low-stock" : ""}>{product.inventory} units</span></div><div className="stock-control"><button type="button" onClick={() => adjustStock(product.id, -1)} disabled={product.inventory === 0}>−</button><strong>{product.inventory}</strong><button type="button" onClick={() => adjustStock(product.id, 1)}>+</button><span>Adjust stock</span></div></div></article>)}</div>}</section>;
++    return <section className="admin-view"><div className="view-toolbar"><div><h2>Product catalogue</h2><p>Stock changes immediately affect recommendations and checkout validation.</p></div><button className="primary-action" type="button" onClick={() => setShowProductForm((value) => !value)}>{showProductForm ? "Close form" : "+ Add product"}</button></div>{showProductForm && <form className="product-form" onSubmit={addProduct}><label>Product name<input required value={newProduct.name} onChange={(event) => setNewProduct({ ...newProduct, name: event.target.value })} /></label><label>Category<input required value={newProduct.category} onChange={(event) => setNewProduct({ ...newProduct, category: event.target.value })} /></label><label>Price (₹)<input required min="1" type="number" value={newProduct.price} onChange={(event) => setNewProduct({ ...newProduct, price: event.target.value })} /></label><label>Opening stock<input required min="0" type="number" value={newProduct.inventory} onChange={(event) => setNewProduct({ ...newProduct, inventory: event.target.value })} /></label><label className="wide-field">Description<input required value={newProduct.description} onChange={(event) => setNewProduct({ ...newProduct, description: event.target.value })} /></label><label className="wide-field">Image URL (optional)<input type="url" placeholder="https://…" value={newProduct.imageUrl} onChange={(event) => setNewProduct({ ...newProduct, imageUrl: event.target.value })} /></label><button type="submit">Save product</button></form>}{error && <div className="admin-error" role="alert">{error}</div>}{viewLoading ? <div className="view-loading">Loading catalogue…</div> : <div className="catalogue-grid">{catalogueProducts.map((product) => <article className="catalogue-card" key={product.id}><div className={`catalogue-swatch ${product.accent}`}>{product.imageUrl ? <img src={product.imageUrl} alt={product.name} loading="lazy" /> : null}<span>{product.category}</span><b>#{product.id}</b></div><div className="catalogue-copy"><div><h3>{product.name}</h3><strong>{formatPrice(product.price)}</strong></div><p>{product.description}</p><div className="catalogue-meta"><span>★ {product.rating}</span><span className={product.inventory < 10 ? "low-stock" : ""}>{product.inventory} units</span></div><div className="stock-control"><button type="button" onClick={() => adjustStock(product.id, -1)} disabled={product.inventory === 0}>−</button><strong>{product.inventory}</strong><button type="button" onClick={() => adjustStock(product.id, 1)}>+</button><span>Adjust stock</span></div></div></article>)}</div>}</section>;
+   }
+ 
+   function renderOrders() {
+diff --git a/app/storefront.tsx b/app/storefront.tsx
+index ba658e7..63dd656 100644
+--- a/app/storefront.tsx
++++ b/app/storefront.tsx
+@@ -11,6 +11,18 @@ type Recommendation = {
+   error?: string;
+ };
+ 
++type CustomerIdentity = { id: string; email: string; name: string | null };
++
++type CustomerOrder = {
++  checkoutId: string;
++  orderNumber: string | null;
++  productName: string | null;
++  storeName: string | null;
++  amountPaise: number;
++  status: string;
++  createdAt: string;
++};
++
+ function money(value: number) {
+   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
+ }
+@@ -29,6 +41,82 @@ export function Storefront({ slug }: { slug: string }) {
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState("");
+ 
++  const [customer, setCustomer] = useState<CustomerIdentity | null>(null);
++  const [showAccount, setShowAccount] = useState(false);
++  const [authStage, setAuthStage] = useState<"email" | "code">("email");
++  const [authEmail, setAuthEmail] = useState("");
++  const [authCode, setAuthCode] = useState("");
++  const [authMessage, setAuthMessage] = useState("");
++  const [authError, setAuthError] = useState("");
++  const [authLoading, setAuthLoading] = useState(false);
++  const [orders, setOrders] = useState<CustomerOrder[]>([]);
++  const [ordersLoading, setOrdersLoading] = useState(false);
++
++  useEffect(() => {
++    fetch("/api/customer/me")
++      .then(async (response) => (response.ok ? ((await response.json()) as { customer: CustomerIdentity }).customer : null))
++      .then((identity) => { if (identity) { setCustomer(identity); setEmail(identity.email); } })
++      .catch(() => null);
++  }, []);
++
++  function loadOrders() {
++    setOrdersLoading(true);
++    fetch("/api/customer/orders")
++      .then(async (response) => {
++        const data = await response.json() as { orders?: CustomerOrder[]; error?: string };
++        if (!response.ok) throw new Error(data.error ?? "Could not load orders");
++        setOrders(data.orders ?? []);
++      })
++      .catch(() => setOrders([]))
++      .finally(() => setOrdersLoading(false));
++  }
++
++  async function sendAuthCode(event: FormEvent) {
++    event.preventDefault();
++    setAuthLoading(true);
++    setAuthError("");
++    setAuthMessage("");
++    try {
++      const response = await fetch("/api/customer/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: authEmail }) });
++      const data = await response.json() as { message?: string; devCode?: string | null; error?: string };
++      if (!response.ok) throw new Error(data.error ?? "Could not send code");
++      setAuthMessage(data.devCode ? `${data.message} Demo code: ${data.devCode}` : data.message ?? "Code sent.");
++      setAuthStage("code");
++    } catch (reason) {
++      setAuthError(reason instanceof Error ? reason.message : "Could not send code");
++    } finally {
++      setAuthLoading(false);
++    }
++  }
++
++  async function verifyAuthCode(event: FormEvent) {
++    event.preventDefault();
++    setAuthLoading(true);
++    setAuthError("");
++    try {
++      const response = await fetch("/api/customer/auth/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: authEmail, code: authCode }) });
++      const data = await response.json() as { customer?: CustomerIdentity; error?: string };
++      if (!response.ok || !data.customer) throw new Error(data.error ?? "Invalid code");
++      setCustomer(data.customer);
++      setEmail(data.customer.email);
++      setAuthStage("email");
++      setAuthCode("");
++      setAuthMessage("");
++      loadOrders();
++    } catch (reason) {
++      setAuthError(reason instanceof Error ? reason.message : "Invalid code");
++    } finally {
++      setAuthLoading(false);
++    }
++  }
++
++  async function signOut() {
++    await fetch("/api/customer/logout", { method: "POST" }).catch(() => null);
++    setCustomer(null);
++    setOrders([]);
++    setShowAccount(false);
++  }
++
+   useEffect(() => {
+     fetch(`/api/catalog?store=${encodeURIComponent(slug)}`)
+       .then(async (response) => {
+@@ -79,5 +167,5 @@ export function Storefront({ slug }: { slug: string }) {
+ 
+   const visibleProducts = results.length ? results : products.slice(0, 6).map((product) => ({ ...product, score: 0, reasons: ["Available now"] }));
+ 
+-  return <main className="storefront-shell"><header className="storefront-header"><a className="store-logo" href={`/store/${slug}`}><span>L</span><strong>{storeName}</strong></a><nav><a href="#assistant">AI shopping assistant</a><a href="#products">Products</a><a href="/">Merchant login</a></nav></header><section className="store-hero" id="assistant"><div><p className="eyebrow">Conversational shopping</p><h1>Tell us what you need. We will find the right product.</h1><p>Describe your budget, use case and preferences. Recommendations come only from {storeName}&apos;s verified catalogue.</p><form onSubmit={recommend}><textarea required minLength={5} maxLength={500} value={query} onChange={(event) => setQuery(event.target.value)} /><div><input type="email" placeholder="Email for order reference (optional)" value={email} onChange={(event) => setEmail(event.target.value)} /><button disabled={loading} type="submit">{loading ? "Searching…" : "Get recommendations"}</button></div></form>{intent && <div className="store-intent"><strong>{engine === "gemini" ? "Gemini intent" : "Safe fallback"}</strong><p>{intent.explanation}</p></div>}{error && <div className="store-error">{error}</div>}</div><aside><span>Why LocalShop AI?</span><ul><li>Catalogue-grounded results</li><li>Live inventory validation</li><li>Explainable recommendations</li><li>Confirmation before payment</li></ul></aside></section><section className="store-products" id="products"><div className="store-section-heading"><div><p className="eyebrow">{results.length ? "Recommended for you" : "Available now"}</p><h2>{results.length ? `${results.length} best matches` : `${products.length} catalogue products`}</h2></div>{intent?.budget && <span>Budget up to {money(intent.budget)}</span>}</div><div className="store-product-grid">{visibleProducts.map((product) => <article className={selected?.id === product.id ? "chosen" : ""} key={product.id}><div className={`store-product-art ${product.accent}`}><span>{product.category}</span><b>{product.inventory} in stock</b></div><div className="store-product-copy"><div><h3>{product.name}</h3><strong>{money(product.price)}</strong></div><p>{product.description}</p><div className="store-reasons">{product.reasons.slice(0, 2).map((reason) => <span key={reason}>{reason}</span>)}</div><button type="button" onClick={() => { setSelected(product); setCheckout(null); }}>{selected?.id === product.id ? "Selected ✓" : "Select product"}</button></div></article>)}</div>{selected && <div className="store-checkout"><div><span>Selected product</span><strong>{selected.name}</strong><p>{money(selected.price)} · Stock verified</p></div><button type="button" disabled={loading} onClick={createCheckout}>{loading ? "Preparing…" : "Confirm and prepare checkout"}</button>{checkout && <div><strong>{checkout.orderNumber}</strong><p>{checkout.message}</p>{checkout.checkoutUrl && <a href={checkout.checkoutUrl} target="_blank" rel="noreferrer">Open Razorpay checkout →</a>}</div>}</div>}</section><footer className="store-footer"><strong>{storeName}</strong><span>AI assists discovery. Catalogue, stock and payment amounts are controlled by the retailer backend.</span></footer></main>;
++  return <main className="storefront-shell"><header className="storefront-header"><a className="store-logo" href={`/store/${slug}`}><span>L</span><strong>{storeName}</strong></a><nav><a href="#assistant">AI shopping assistant</a><a href="#products">Products</a><button type="button" className="store-account-toggle" onClick={() => { setShowAccount((value) => !value); if (customer && !orders.length) loadOrders(); }}>{customer ? (customer.name ?? customer.email) : "Sign in"}</button><a href="/">Merchant login</a></nav></header>{showAccount && <section className="store-account-panel">{!customer ? <div><p className="eyebrow">Sign in to track your orders</p>{authStage === "email" ? <form onSubmit={sendAuthCode}><input required type="email" placeholder="you@example.com" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} /><button disabled={authLoading} type="submit">{authLoading ? "Sending…" : "Send code"}</button></form> : <form onSubmit={verifyAuthCode}><input required pattern="\d{6}" maxLength={6} placeholder="6-digit code" value={authCode} onChange={(event) => setAuthCode(event.target.value)} /><button disabled={authLoading} type="submit">{authLoading ? "Verifying…" : "Verify"}</button><button type="button" onClick={() => { setAuthStage("email"); setAuthCode(""); }}>Use a different email</button></form>}{authMessage && <p className="store-account-message">{authMessage}</p>}{authError && <div className="store-error">{authError}</div>}</div> : <div><div className="store-account-header"><span>Signed in as {customer.email}</span><button type="button" onClick={signOut}>Sign out</button></div><p className="eyebrow">Your orders</p>{ordersLoading ? <p>Loading…</p> : orders.length === 0 ? <p>No orders yet. Recommendations you confirm will show up here.</p> : <ul className="store-order-list">{orders.map((order) => <li key={order.checkoutId}><div><strong>{order.productName ?? "Product"}</strong><span>{order.storeName ?? "Store"}</span></div><div><span>{money(order.amountPaise / 100)}</span><em>{order.status}</em></div></li>)}</ul>}</div>}</section>}<section className="store-hero" id="assistant"><div><p className="eyebrow">Conversational shopping</p><h1>Tell us what you need. We will find the right product.</h1><p>Describe your budget, use case and preferences. Recommendations come only from {storeName}&apos;s verified catalogue.</p><form onSubmit={recommend}><textarea required minLength={5} maxLength={500} value={query} onChange={(event) => setQuery(event.target.value)} /><div><input type="email" placeholder="Email for order reference (optional)" value={email} onChange={(event) => setEmail(event.target.value)} /><button disabled={loading} type="submit">{loading ? "Searching…" : "Get recommendations"}</button></div></form>{intent && <div className="store-intent"><strong>{engine === "gemini" ? "Gemini intent" : "Safe fallback"}</strong><p>{intent.explanation}</p></div>}{error && <div className="store-error">{error}</div>}</div><aside><span>Why LocalShop AI?</span><ul><li>Catalogue-grounded results</li><li>Live inventory validation</li><li>Explainable recommendations</li><li>Confirmation before payment</li></ul></aside></section><section className="store-products" id="products"><div className="store-section-heading"><div><p className="eyebrow">{results.length ? "Recommended for you" : "Available now"}</p><h2>{results.length ? `${results.length} best matches` : `${products.length} catalogue products`}</h2></div>{intent?.budget && <span>Budget up to {money(intent.budget)}</span>}</div><div className="store-product-grid">{visibleProducts.map((product) => <article className={selected?.id === product.id ? "chosen" : ""} key={product.id}><div className={`store-product-art ${product.accent}`}>{product.imageUrl ? <img src={product.imageUrl} alt={product.name} loading="lazy" /> : null}<span>{product.category}</span><b>{product.inventory} in stock</b></div><div className="store-product-copy"><div><h3>{product.name}</h3><strong>{money(product.price)}</strong></div><p>{product.description}</p><div className="store-reasons">{product.reasons.slice(0, 2).map((reason) => <span key={reason}>{reason}</span>)}</div><button type="button" onClick={() => { setSelected(product); setCheckout(null); }}>{selected?.id === product.id ? "Selected ✓" : "Select product"}</button></div></article>)}</div>{selected && <div className="store-checkout"><div><span>Selected product</span><strong>{selected.name}</strong><p>{money(selected.price)} · Stock verified</p></div><button type="button" disabled={loading} onClick={createCheckout}>{loading ? "Preparing…" : "Confirm and prepare checkout"}</button>{checkout && <div><strong>{checkout.orderNumber}</strong><p>{checkout.message}</p>{checkout.checkoutUrl && <a href={checkout.checkoutUrl} target="_blank" rel="noreferrer">Open Razorpay checkout →</a>}</div>}</div>}</section><footer className="store-footer"><strong>{storeName}</strong><span>AI assists discovery. Catalogue, stock and payment amounts are controlled by the retailer backend.</span></footer></main>;
+ }
+diff --git a/db/schema.ts b/db/schema.ts
+index ebcdde7..f0e510c 100644
+--- a/db/schema.ts
++++ b/db/schema.ts
+@@ -59,6 +59,7 @@ export const products = sqliteTable(
+     description: text("description").notNull(),
+     tags: text("tags").notNull().default("[]"),
+     accent: text("accent").notNull().default("lime"),
++    imageUrl: text("image_url"),
+     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+   },
+@@ -104,6 +105,7 @@ export const checkoutEvents = sqliteTable(
+     id: integer("id").primaryKey({ autoIncrement: true }),
+     checkoutId: text("checkout_id").notNull().unique(),
+     merchantId: text("merchant_id").notNull().default("merchant_nova"),
++    customerId: text("customer_id"),
+     customerEmail: text("customer_email"),
+     orderNumber: text("order_number"),
+     sessionId: text("session_id").notNull(),
+@@ -114,5 +116,34 @@ export const checkoutEvents = sqliteTable(
+     status: text("status").notNull(),
+     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+   },
+-  (table) => [index("checkout_merchant_idx").on(table.merchantId)],
++  (table) => [
++    index("checkout_merchant_idx").on(table.merchantId),
++    index("checkout_customer_idx").on(table.customerId),
++  ],
++);
++
++export const customers = sqliteTable(
++  "customers",
++  {
++    id: text("id").primaryKey(),
++    email: text("email").notNull(),
++    name: text("name"),
++    status: text("status").notNull().default("active"),
++    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
++    lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
++  },
++  (table) => [uniqueIndex("customer_email_idx").on(table.email)],
++);
++
++export const customerOtps = sqliteTable(
++  "customer_otps",
++  {
++    id: integer("id").primaryKey({ autoIncrement: true }),
++    email: text("email").notNull(),
++    codeHash: text("code_hash").notNull(),
++    expiresAt: text("expires_at").notNull(),
++    consumed: integer("consumed").notNull().default(0),
++    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
++  },
++  (table) => [index("customer_otp_email_idx").on(table.email)],
+ );
+diff --git a/lib/audit-store.ts b/lib/audit-store.ts
+index b1a4402..7298c91 100644
+--- a/lib/audit-store.ts
++++ b/lib/audit-store.ts
+@@ -24,6 +24,7 @@ type FallbackCheckout = {
+   id: number;
+   checkoutId: string;
+   merchantId: string;
++  customerId: string | null;
+   customerEmail: string | null;
+   orderNumber: string | null;
+   sessionId: string;
+@@ -115,6 +116,7 @@ export async function listRecentAudit(limit = 60, merchantId = DEMO_MERCHANT_ID)
+ export async function saveCheckout(input: {
+   checkoutId: string;
+   merchantId?: string;
++  customerId?: string;
+   customerEmail?: string;
+   orderNumber?: string;
+   sessionId: string;
+@@ -134,6 +136,7 @@ export async function saveCheckout(input: {
+       id: fallbackCheckouts.length + 1,
+       ...input,
+       merchantId: input.merchantId ?? DEMO_MERCHANT_ID,
++      customerId: input.customerId ?? null,
+       customerEmail: input.customerEmail ?? null,
+       orderNumber: input.orderNumber ?? null,
+       providerReference: input.providerReference ?? null,
+@@ -143,6 +146,24 @@ export async function saveCheckout(input: {
+   }
+ }
+ 
++export async function listCheckoutsForCustomer(customerId: string, limit = 50) {
++  try {
++    await ensureRuntimeSchema();
++    const db = getDb();
++    return await db
++      .select()
++      .from(checkoutEvents)
++      .where(eq(checkoutEvents.customerId, customerId))
++      .orderBy(desc(checkoutEvents.id))
++      .limit(Math.min(Math.max(limit, 1), 100));
++  } catch {
++    return fallbackCheckouts
++      .filter((order) => order.customerId === customerId)
++      .slice(-Math.min(Math.max(limit, 1), 100))
++      .reverse();
++  }
++}
++
+ export async function listCheckouts(limit = 50, merchantId = DEMO_MERCHANT_ID) {
+   try {
+     await ensureRuntimeSchema();
+diff --git a/lib/catalog.ts b/lib/catalog.ts
+index 900dc10..cf78fac 100644
+--- a/lib/catalog.ts
++++ b/lib/catalog.ts
+@@ -16,6 +16,7 @@ export type CatalogProduct = {
+   description: string;
+   tags: string[];
+   accent: string;
++  imageUrl?: string | null;
+ };
+ 
+ export type RankedProduct = CatalogProduct & {
+diff --git a/lib/customer-auth.ts b/lib/customer-auth.ts
+new file mode 100644
+index 0000000..013e79a
+--- /dev/null
++++ b/lib/customer-auth.ts
+@@ -0,0 +1,206 @@
++import { and, desc, eq } from "drizzle-orm";
++import { getDb } from "../db";
++import { customerOtps, customers } from "../db/schema";
++import { ensureRuntimeSchema } from "./db-init";
++import { getRuntimeValue } from "./runtime-env";
++
++export const CUSTOMER_SESSION_COOKIE = "lsa_customer_session";
++const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
++const OTP_TTL_MINUTES = 10;
++
++export type Customer = {
++  id: string;
++  email: string;
++  name: string | null;
++};
++
++type FallbackCustomer = Customer & { status: string; createdAt: string; lastSeenAt: string };
++type FallbackOtp = { email: string; codeHash: string; expiresAt: string; consumed: boolean };
++
++const fallbackCustomers = new Map<string, FallbackCustomer>();
++const fallbackOtps: FallbackOtp[] = [];
++
++function normalizeEmail(email: string) {
++  return email.trim().toLowerCase();
++}
++
++async function sha256Hex(value: string) {
++  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
++  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
++}
++
++function customerIdFor(email: string) {
++  // Deterministic id keeps repeated sign-ins idempotent without a lookup.
++  return sha256Hex(email).then((hash) => `cus_${hash.slice(0, 24)}`);
++}
++
++function generateOtp() {
++  const bytes = crypto.getRandomValues(new Uint32Array(1));
++  return String(100000 + (bytes[0] % 900000));
++}
++
++async function ensureCustomerRow(email: string, id: string) {
++  try {
++    await ensureRuntimeSchema();
++    const db = getDb();
++    await db
++      .insert(customers)
++      .values({ id, email })
++      .onConflictDoUpdate({ target: customers.email, set: { lastSeenAt: new Date().toISOString() } });
++    const [row] = await db.select().from(customers).where(eq(customers.email, email)).limit(1);
++    return row ?? null;
++  } catch {
++    const existing = fallbackCustomers.get(email);
++    if (existing) {
++      existing.lastSeenAt = new Date().toISOString();
++      return existing;
++    }
++    const created: FallbackCustomer = { id, email, name: null, status: "active", createdAt: new Date().toISOString(), lastSeenAt: new Date().toISOString() };
++    fallbackCustomers.set(email, created);
++    return created;
++  }
++}
++
++/**
++ * Starts the sign-in flow: creates the customer record if needed and stores
++ * a hashed OTP. If no email provider is configured, the raw code is returned
++ * so the demo/local flow keeps working without paid credentials, mirroring
++ * how the Razorpay and Gemini integrations degrade gracefully.
++ */
++export async function requestCustomerOtp(rawEmail: string) {
++  const email = normalizeEmail(rawEmail);
++  const id = await customerIdFor(email);
++  await ensureCustomerRow(email, id);
++
++  const code = generateOtp();
++  const codeHash = await sha256Hex(code);
++  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString();
++
++  try {
++    await ensureRuntimeSchema();
++    await getDb().insert(customerOtps).values({ email, codeHash, expiresAt });
++  } catch {
++    fallbackOtps.push({ email, codeHash, expiresAt, consumed: false });
++  }
++
++  const resendKey = getRuntimeValue("RESEND_API_KEY");
++  const fromAddress = getRuntimeValue("TRANSACTIONAL_EMAIL_FROM") ?? "LocalShop AI <onboarding@resend.dev>";
++  if (resendKey) {
++    await fetch("https://api.resend.com/emails", {
++      method: "POST",
++      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
++      body: JSON.stringify({
++        from: fromAddress,
++        to: email,
++        subject: `Your LocalShop AI sign-in code: ${code}`,
++        text: `Your sign-in code is ${code}. It expires in ${OTP_TTL_MINUTES} minutes.`,
++      }),
++    }).catch(() => null);
++    return { sent: true, devCode: null as string | null };
++  }
++
++  // No email provider configured: safe local/demo mode.
++  return { sent: false, devCode: code };
++}
++
++export async function verifyCustomerOtp(rawEmail: string, code: string): Promise<Customer | null> {
++  const email = normalizeEmail(rawEmail);
++  const codeHash = await sha256Hex(code.trim());
++  const now = Date.now();
++
++  try {
++    await ensureRuntimeSchema();
++    const db = getDb();
++    const [otp] = await db
++      .select()
++      .from(customerOtps)
++      .where(and(eq(customerOtps.email, email), eq(customerOtps.codeHash, codeHash), eq(customerOtps.consumed, 0)))
++      .orderBy(desc(customerOtps.id))
++      .limit(1);
++    if (!otp || new Date(otp.expiresAt).getTime() < now) return null;
++    await db.update(customerOtps).set({ consumed: 1 }).where(eq(customerOtps.id, otp.id));
++    const id = await customerIdFor(email);
++    const row = await ensureCustomerRow(email, id);
++    return row ? { id: row.id, email: row.email, name: row.name } : null;
++  } catch {
++    const match = fallbackOtps
++      .filter((otp) => otp.email === email && otp.codeHash === codeHash && !otp.consumed)
++      .sort((a, b) => (a.expiresAt < b.expiresAt ? 1 : -1))[0];
++    if (!match || new Date(match.expiresAt).getTime() < now) return null;
++    match.consumed = true;
++    const id = await customerIdFor(email);
++    const row = await ensureCustomerRow(email, id);
++    return row ? { id: row.id, email: row.email, name: row.name } : null;
++  }
++}
++
++async function hmacKey() {
++  const secret = getRuntimeValue("CUSTOMER_SESSION_SECRET") ?? "localshop-ai-dev-session-secret";
++  return crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
++}
++
++export async function signCustomerSession(customerId: string) {
++  const expires = Date.now() + SESSION_TTL_SECONDS * 1000;
++  const payload = `${customerId}.${expires}`;
++  const key = await hmacKey();
++  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
++  const signatureHex = Array.from(new Uint8Array(signature)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
++  const token = `${payload}.${signatureHex}`;
++  return { token, maxAge: SESSION_TTL_SECONDS };
++}
++
++async function verifyCustomerSessionToken(token: string): Promise<string | null> {
++  const parts = token.split(".");
++  if (parts.length !== 3) return null;
++  const [customerId, expiresRaw, signatureHex] = parts;
++  const expires = Number(expiresRaw);
++  if (!customerId || !Number.isFinite(expires) || expires < Date.now()) return null;
++
++  const key = await hmacKey();
++  const payload = `${customerId}.${expiresRaw}`;
++  const expectedSig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
++  const expectedHex = Array.from(new Uint8Array(expectedSig)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
++  if (expectedHex.length !== signatureHex.length) return null;
++  let mismatch = 0;
++  for (let index = 0; index < expectedHex.length; index += 1) {
++    mismatch |= expectedHex.charCodeAt(index) ^ signatureHex.charCodeAt(index);
++  }
++  return mismatch === 0 ? customerId : null;
++}
++
++function readCookie(request: Request, name: string) {
++  const header = request.headers.get("cookie");
++  if (!header) return null;
++  for (const part of header.split(";")) {
++    const [key, ...rest] = part.trim().split("=");
++    if (key === name) return decodeURIComponent(rest.join("="));
++  }
++  return null;
++}
++
++export function customerSessionCookieHeader(token: string, maxAge: number) {
++  const secure = getRuntimeValue("NODE_ENV") === "production" ? "; Secure" : "";
++  return `${CUSTOMER_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
++}
++
++export function clearCustomerSessionCookieHeader() {
++  return `${CUSTOMER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
++}
++
++export async function resolveCustomer(request: Request): Promise<Customer | null> {
++  const token = readCookie(request, CUSTOMER_SESSION_COOKIE);
++  if (!token) return null;
++  const customerId = await verifyCustomerSessionToken(token);
++  if (!customerId) return null;
++
++  try {
++    await ensureRuntimeSchema();
++    const [row] = await getDb().select().from(customers).where(eq(customers.id, customerId)).limit(1);
++    return row ? { id: row.id, email: row.email, name: row.name } : null;
++  } catch {
++    for (const customer of fallbackCustomers.values()) {
++      if (customer.id === customerId) return { id: customer.id, email: customer.email, name: customer.name };
++    }
++    return null;
++  }
++}
+diff --git a/lib/db-init.ts b/lib/db-init.ts
+index eb46181..1c5d62d 100644
+--- a/lib/db-init.ts
++++ b/lib/db-init.ts
+@@ -10,15 +10,28 @@ const statements = [
+   `CREATE TABLE IF NOT EXISTS memberships (id TEXT PRIMARY KEY NOT NULL, merchant_id TEXT NOT NULL, user_id TEXT, email TEXT NOT NULL, role TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'invited', invited_by TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+   `CREATE UNIQUE INDEX IF NOT EXISTS membership_merchant_email_idx ON memberships (merchant_id, email)`,
+   `CREATE INDEX IF NOT EXISTS membership_user_idx ON memberships (user_id)`,
+-  `CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, merchant_id TEXT NOT NULL DEFAULT 'merchant_nova', name TEXT NOT NULL, category TEXT NOT NULL, price INTEGER NOT NULL, rating REAL NOT NULL DEFAULT 4.5, inventory INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', accent TEXT NOT NULL DEFAULT 'lime', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
++  `CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, merchant_id TEXT NOT NULL DEFAULT 'merchant_nova', name TEXT NOT NULL, category TEXT NOT NULL, price INTEGER NOT NULL, rating REAL NOT NULL DEFAULT 4.5, inventory INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', accent TEXT NOT NULL DEFAULT 'lime', image_url TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+   `CREATE INDEX IF NOT EXISTS product_merchant_idx ON products (merchant_id)`,
+   `CREATE TABLE IF NOT EXISTS shopping_sessions (id TEXT PRIMARY KEY NOT NULL, merchant_id TEXT NOT NULL, customer_email TEXT, query TEXT NOT NULL, intent_json TEXT NOT NULL, engine TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+   `CREATE INDEX IF NOT EXISTS shopping_session_merchant_idx ON shopping_sessions (merchant_id)`,
+   `CREATE TABLE IF NOT EXISTS audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, event_id TEXT NOT NULL, merchant_id TEXT NOT NULL DEFAULT 'merchant_nova', session_id TEXT NOT NULL, event_type TEXT NOT NULL, detail TEXT NOT NULL, engine TEXT NOT NULL DEFAULT 'system', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+   `CREATE UNIQUE INDEX IF NOT EXISTS audit_event_id_idx ON audit_events (event_id)`,
+   `CREATE INDEX IF NOT EXISTS audit_merchant_idx ON audit_events (merchant_id)`,
+-  `CREATE TABLE IF NOT EXISTS checkout_events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, checkout_id TEXT NOT NULL UNIQUE, merchant_id TEXT NOT NULL DEFAULT 'merchant_nova', customer_email TEXT, order_number TEXT, session_id TEXT NOT NULL, product_id INTEGER NOT NULL, amount_paise INTEGER NOT NULL, provider TEXT NOT NULL, provider_reference TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
++  `CREATE TABLE IF NOT EXISTS checkout_events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, checkout_id TEXT NOT NULL UNIQUE, merchant_id TEXT NOT NULL DEFAULT 'merchant_nova', customer_id TEXT, customer_email TEXT, order_number TEXT, session_id TEXT NOT NULL, product_id INTEGER NOT NULL, amount_paise INTEGER NOT NULL, provider TEXT NOT NULL, provider_reference TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+   `CREATE INDEX IF NOT EXISTS checkout_merchant_idx ON checkout_events (merchant_id)`,
++  `CREATE INDEX IF NOT EXISTS checkout_customer_idx ON checkout_events (customer_id)`,
++  `CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY NOT NULL, email TEXT NOT NULL, name TEXT, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
++  `CREATE UNIQUE INDEX IF NOT EXISTS customer_email_idx ON customers (email)`,
++  `CREATE TABLE IF NOT EXISTS customer_otps (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, email TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
++  `CREATE INDEX IF NOT EXISTS customer_otp_email_idx ON customer_otps (email)`,
++];
++
++// Columns added after the initial release. SQLite has no
++// "ADD COLUMN IF NOT EXISTS", so these run individually and a
++// "duplicate column" failure (already applied) is swallowed.
++const columnMigrations = [
++  `ALTER TABLE checkout_events ADD COLUMN customer_id TEXT`,
++  `ALTER TABLE products ADD COLUMN image_url TEXT`,
+ ];
+ 
+ export async function ensureRuntimeSchema() {
+@@ -26,6 +39,14 @@ export async function ensureRuntimeSchema() {
+   schemaReady = (async () => {
+     if (!env.DB) throw new Error("D1 binding is unavailable");
+     await env.DB.batch(statements.map((statement) => env.DB!.prepare(statement)));
++    for (const migration of columnMigrations) {
++      try {
++        await env.DB.prepare(migration).run();
++      } catch (error) {
++        const message = error instanceof Error ? error.message.toLowerCase() : "";
++        if (!message.includes("duplicate column")) throw error;
++      }
++    }
+   })().catch((error) => {
+     schemaReady = null;
+     throw error;
+diff --git a/lib/product-store.ts b/lib/product-store.ts
+index 90c9ab1..a091589 100644
+--- a/lib/product-store.ts
++++ b/lib/product-store.ts
+@@ -35,6 +35,7 @@ function rowToProduct(row: typeof products.$inferSelect): CatalogProduct {
+     description: row.description,
+     tags,
+     accent: row.accent,
++    imageUrl: row.imageUrl ?? null,
+   };
+ }
+ 

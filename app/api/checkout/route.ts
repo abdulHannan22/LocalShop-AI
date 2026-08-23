@@ -2,6 +2,7 @@ import { saveAudit, saveCheckout } from "../../../lib/audit-store";
 import { getStoredProduct } from "../../../lib/product-store";
 import { getRuntimeValue } from "../../../lib/runtime-env";
 import { getActor, resolveMerchantBySlug } from "../../../lib/authz";
+import { resolveCustomer } from "../../../lib/customer-auth";
 
 type RazorpayPaymentLink = {
   id?: string;
@@ -50,6 +51,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "The selected product is unavailable." }, { status: 404 });
   }
 
+  // Guest checkout stays supported; a signed-in customer just gets the
+  // order attached to their account so it shows up in order history.
+  const customer = await resolveCustomer(request);
+  const customerId = customer?.id;
+  const customerEmail = customer?.email ?? payload.customerEmail;
+
   const checkoutId = crypto.randomUUID();
   const orderNumber = `LSA-${Date.now().toString(36).toUpperCase()}`;
   const amountPaise = product.price * 100;
@@ -60,7 +67,8 @@ export async function POST(request: Request) {
     await saveCheckout({
       checkoutId,
       merchantId: merchant.id,
-      customerEmail: payload.customerEmail,
+      customerId,
+      customerEmail,
       orderNumber,
       sessionId,
       productId,
@@ -130,7 +138,8 @@ export async function POST(request: Request) {
   await saveCheckout({
     checkoutId,
     merchantId: merchant.id,
-    customerEmail: payload.customerEmail,
+    customerId,
+    customerEmail,
     orderNumber,
     sessionId,
     productId,

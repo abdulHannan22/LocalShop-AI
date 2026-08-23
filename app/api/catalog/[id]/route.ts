@@ -30,7 +30,7 @@ export async function PATCH(
       : Response.json({ error: "Product not found." }, { status: 404 });
   }
 
-  const patch: Record<string, string | number | string[]> = {};
+  const patch: Record<string, string | number | string[] | null> = {};
   for (const key of ["name", "category", "description", "accent"] as const) {
     if (typeof body[key] === "string" && body[key].trim()) patch[key] = body[key].trim();
   }
@@ -39,6 +39,9 @@ export async function PATCH(
     if (Number.isFinite(value) && value >= 0) patch[key] = value;
   }
   if (Array.isArray(body.tags)) patch.tags = body.tags.filter((tag): tag is string => typeof tag === "string").slice(0, 10);
+  if (typeof body.imageUrl === "string") {
+    patch.imageUrl = /^https:\/\/\S+$/.test(body.imageUrl.trim()) ? body.imageUrl.trim() : null;
+  }
 
   if (!can(actor, "catalogue:write")) return Response.json({ error: "Catalogue-write permission is required." }, { status: 403 });
   const product = await updateProduct(id, patch, actor.merchantId);
