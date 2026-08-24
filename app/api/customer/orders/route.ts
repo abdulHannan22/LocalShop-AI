@@ -4,6 +4,8 @@ import { merchants, products } from "../../../../db/schema";
 import { listCheckoutsForCustomer } from "../../../../lib/audit-store";
 import { resolveCustomer } from "../../../../lib/customer-auth";
 
+const CANCELLABLE_STATUSES = ["ready", "created", "paid", "packed"];
+
 export async function GET(request: Request) {
   const customer = await resolveCustomer(request);
   if (!customer) {
@@ -43,6 +45,7 @@ export async function GET(request: Request) {
     amountPaise: order.amountPaise,
     provider: order.provider,
     status: order.status,
+    cancellable: CANCELLABLE_STATUSES.includes(order.status),
     createdAt: order.createdAt,
   }));
 
