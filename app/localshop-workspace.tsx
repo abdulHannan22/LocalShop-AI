@@ -303,6 +303,24 @@ export function LocalShopWorkspace() {
     }
   }
 
+  const ORDER_STATUS_LABELS: Record<string, string> = { ready: "Ready", created: "Created", paid: "Paid", packed: "Packed", shipped: "Shipped", delivered: "Delivered", cancellation_requested: "Return requested", cancelled: "Cancelled" };
+
+  function orderActions(status: string): Array<{ label: string; next: string }> {
+    if (status === "cancellation_requested") return [{ label: "Approve return", next: "cancelled" }, { label: "Dismiss request", next: "paid" }];
+    if (status === "cancelled" || status === "delivered") return [];
+    const forward: Record<string, { label: string; next: string }> = {
+      ready: { label: "Pack", next: "packed" },
+      created: { label: "Pack", next: "packed" },
+      paid: { label: "Pack", next: "packed" },
+      packed: { label: "Ship", next: "shipped" },
+      shipped: { label: "Mark delivered", next: "delivered" },
+    };
+    const actions = [] as Array<{ label: string; next: string }>;
+    if (forward[status]) actions.push(forward[status]);
+    actions.push({ label: "Cancel", next: "cancelled" });
+    return actions;
+  }
+
   async function changeOrderStatus(checkoutId: string, nextStatus: string) {
     setError("");
     try {
@@ -390,7 +408,7 @@ export function LocalShopWorkspace() {
   }
 
   function renderOrders() {
-    return <section className="admin-view"><div className="view-toolbar"><div><h2>Checkout orders</h2><p>Simulation and Razorpay test checkouts appear in one operational queue.</p></div><button className="secondary-action" type="button" onClick={loadOrders}>Refresh</button></div>{error && <div className="admin-error" role="alert">{error}</div>}{viewLoading ? <div className="view-loading">Loading orders…</div> : orders.length === 0 ? <div className="empty-state"><strong>No orders yet</strong><p>Create a checkout from the Sales agent, then return here.</p><button type="button" onClick={() => setTab("sales")}>Open sales agent</button></div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Order</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{orders.map((order) => <tr key={order.checkoutId}><td><strong>{order.checkoutId.slice(0, 8)}</strong><span>{order.sessionId.slice(0, 8)}</span></td><td>{order.productName}</td><td>{formatPrice(order.amountPaise / 100)}</td><td><span className="provider-pill">{order.provider}</span></td><td><span className={`status-pill ${order.status}`}>{order.status}</span></td><td>{shortDate(order.createdAt)}</td><td><div className="row-actions"><button type="button" onClick={() => changeOrderStatus(order.checkoutId, "fulfilled")}>Fulfil</button><button type="button" onClick={() => changeOrderStatus(order.checkoutId, "cancelled")}>Cancel</button></div></td></tr>)}</tbody></table></div>}</section>;
+    return <section className="admin-view"><div className="view-toolbar"><div><h2>Checkout orders</h2><p>Simulation and Razorpay test checkouts appear in one operational queue.</p></div><button className="secondary-action" type="button" onClick={loadOrders}>Refresh</button></div>{error && <div className="admin-error" role="alert">{error}</div>}{viewLoading ? <div className="view-loading">Loading orders…</div> : orders.length === 0 ? <div className="empty-state"><strong>No orders yet</strong><p>Create a checkout from the Sales agent, then return here.</p><button type="button" onClick={() => setTab("sales")}>Open sales agent</button></div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Order</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{orders.map((order) => <tr key={order.checkoutId}><td><strong>{order.checkoutId.slice(0, 8)}</strong><span>{order.sessionId.slice(0, 8)}</span></td><td>{order.productName}</td><td>{formatPrice(order.amountPaise / 100)}</td><td><span className="provider-pill">{order.provider}</span></td><td><span className={`status-pill ${order.status}`}>{ORDER_STATUS_LABELS[order.status] ?? order.status}</span></td><td>{shortDate(order.createdAt)}</td><td><div className="row-actions">{orderActions(order.status).map((action) => <button type="button" key={action.label} onClick={() => changeOrderStatus(order.checkoutId, action.next)}>{action.label}</button>)}</div></td></tr>)}</tbody></table></div>}</section>;
   }
 
   function renderInsights() {

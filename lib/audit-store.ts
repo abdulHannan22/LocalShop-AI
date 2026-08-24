@@ -164,6 +164,37 @@ export async function listCheckoutsForCustomer(customerId: string, limit = 50) {
   }
 }
 
+export async function getCheckoutForCustomer(checkoutId: string, customerId: string) {
+  try {
+    await ensureRuntimeSchema();
+    const [row] = await getDb()
+      .select()
+      .from(checkoutEvents)
+      .where(and(eq(checkoutEvents.checkoutId, checkoutId), eq(checkoutEvents.customerId, customerId)))
+      .limit(1);
+    return row ?? null;
+  } catch {
+    return fallbackCheckouts.find((order) => order.checkoutId === checkoutId && order.customerId === customerId) ?? null;
+  }
+}
+
+export async function updateCheckoutStatusForCustomer(checkoutId: string, customerId: string, status: string) {
+  try {
+    await ensureRuntimeSchema();
+    const [row] = await getDb()
+      .update(checkoutEvents)
+      .set({ status })
+      .where(and(eq(checkoutEvents.checkoutId, checkoutId), eq(checkoutEvents.customerId, customerId)))
+      .returning();
+    return row ?? null;
+  } catch {
+    const index = fallbackCheckouts.findIndex((order) => order.checkoutId === checkoutId && order.customerId === customerId);
+    if (index < 0) return null;
+    fallbackCheckouts[index] = { ...fallbackCheckouts[index], status };
+    return fallbackCheckouts[index];
+  }
+}
+
 export async function listCheckouts(limit = 50, merchantId = DEMO_MERCHANT_ID) {
   try {
     await ensureRuntimeSchema();
