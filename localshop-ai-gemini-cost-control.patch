@@ -1,0 +1,180 @@
+diff --git a/app/api/insights/route.ts b/app/api/insights/route.ts
+index dd1b5cd..9a637f3 100644
+--- a/app/api/insights/route.ts
++++ b/app/api/insights/route.ts
+@@ -1,15 +1,18 @@
+-import { listCheckouts, listRecentAudit } from "../../../lib/audit-store";
++import { countTodayGeminiCalls, listCheckouts, listRecentAudit } from "../../../lib/audit-store";
+ import { listProducts } from "../../../lib/product-store";
+ import { can, getActor } from "../../../lib/authz";
++import { getRuntimeValue } from "../../../lib/runtime-env";
+ 
+ export async function GET(request: Request) {
+   const actor = await getActor(request);
+   if (!actor?.merchantId || !can(actor, "insights:read")) return Response.json({ error: "Insights permission is required." }, { status: actor ? 403 : 401 });
+-  const [products, orders, audit] = await Promise.all([
++  const [products, orders, audit, geminiCallsToday] = await Promise.all([
+     listProducts(actor.merchantId),
+     listCheckouts(100, actor.merchantId),
+     listRecentAudit(200, actor.merchantId),
++    countTodayGeminiCalls(actor.merchantId),
+   ]);
++  const geminiDailyLimit = Number(getRuntimeValue("GEMINI_DAILY_LIMIT") ?? "200");
+   const inventoryUnits = products.reduce((sum, product) => sum + product.inventory, 0);
+   const revenuePaise = orders
+     .filter((order) => order.status !== "cancelled")
+@@ -29,6 +32,8 @@ export async function GET(request: Request) {
+       aiSessions: new Set(audit.map((event) => event.sessionId)).size,
+       recommendationHitRate: recommendationOutcomes ? Math.round((hits / recommendationOutcomes) * 100) : null,
+       recommendationOutcomes,
++      geminiCallsToday,
++      geminiDailyLimit,
+     },
+     lowStock: products.filter((product) => product.inventory < 10).sort((a, b) => a.inventory - b.inventory),
+     recentOrders: orders.slice(0, 5),
+diff --git a/app/api/recommend/route.ts b/app/api/recommend/route.ts
+index 5c050a3..045c8e4 100644
+--- a/app/api/recommend/route.ts
++++ b/app/api/recommend/route.ts
+@@ -1,8 +1,9 @@
+-import { saveAudit } from "../../../lib/audit-store";
++import { countTodayGeminiCalls, saveAudit } from "../../../lib/audit-store";
+ import { assessMatchQuality, rankProducts } from "../../../lib/catalog";
+ import { extractShoppingIntent } from "../../../lib/gemini";
+ import { listProducts } from "../../../lib/product-store";
+ import { getActor, resolveMerchantBySlug } from "../../../lib/authz";
++import { getRuntimeValue } from "../../../lib/runtime-env";
+ import { saveShoppingSession } from "../../../lib/session-store";
+ 
+ export async function POST(request: Request) {
+@@ -29,7 +30,16 @@ export async function POST(request: Request) {
+       ? { id: actor.merchantId }
+       : null;
+   if (!merchant) return Response.json({ error: "A valid store is required." }, { status: 404 });
+-  const { intent, engine } = await extractShoppingIntent(query);
++
++  // Cost control: cap real Gemini calls per merchant per UTC day. Once hit,
++  // requests keep working via the deterministic fallback instead of failing
++  // or silently racking up cost — same graceful-degradation shape used for
++  // Razorpay and transactional email elsewhere in the app.
++  const geminiDailyLimit = Number(getRuntimeValue("GEMINI_DAILY_LIMIT") ?? "200");
++  const geminiCallsToday = await countTodayGeminiCalls(merchant.id);
++  const rateLimited = geminiCallsToday >= geminiDailyLimit;
++
++  const { intent, engine } = await extractShoppingIntent(query, { forceRules: rateLimited });
+   const catalogue = await listProducts(merchant.id);
+   const products = rankProducts(intent, catalogue);
+   const matchQuality = assessMatchQuality(products);
+@@ -53,6 +63,15 @@ export async function POST(request: Request) {
+           : `Match quality: ${matchQuality}`,
+       engine: "rules",
+     },
++    ...(rateLimited
++      ? [
++          {
++            event: "gemini.rate_limited",
++            detail: `Daily Gemini cap (${geminiDailyLimit}) reached — used deterministic fallback instead`,
++            engine: "system",
++          },
++        ]
++      : []),
+   ];
+ 
+   await Promise.all(
+diff --git a/app/localshop-workspace.tsx b/app/localshop-workspace.tsx
+index 34839c5..62a101a 100644
+--- a/app/localshop-workspace.tsx
++++ b/app/localshop-workspace.tsx
+@@ -75,6 +75,8 @@ type InsightData = {
+     aiSessions: number;
+     recommendationHitRate: number | null;
+     recommendationOutcomes: number;
++    geminiCallsToday: number;
++    geminiDailyLimit: number;
+   };
+   lowStock: CatalogProduct[];
+   recentOrders: Order[];
+@@ -415,7 +417,7 @@ export function LocalShopWorkspace() {
+ 
+   function renderInsights() {
+     const metrics = insights?.metrics;
+-    return <section className="admin-view"><div className="view-toolbar"><div><h2>Merchant insights</h2><p>Live operational metrics calculated from catalogue, audit and checkout data.</p></div><button className="secondary-action" type="button" onClick={loadInsights}>Refresh</button></div>{error && <div className="admin-error" role="alert">{error}</div>}{viewLoading || !metrics ? <div className="view-loading">Calculating insights…</div> : <><div className="metric-grid"><article><span>Live products</span><strong>{metrics.products}</strong><small>available to the agent</small></article><article><span>Inventory units</span><strong>{metrics.inventoryUnits}</strong><small>across all products</small></article><article><span>Low-stock items</span><strong>{metrics.lowStock}</strong><small>below 10 units</small></article><article><span>Checkouts</span><strong>{metrics.orders}</strong><small>test and simulated</small></article><article><span>Potential revenue</span><strong>{formatPrice(metrics.potentialRevenue)}</strong><small>excluding cancelled</small></article><article><span>AI sessions</span><strong>{metrics.aiSessions}</strong><small>audited conversations</small></article><article><span>Recommendation hit rate</span><strong>{metrics.recommendationHitRate === null ? "—" : `${metrics.recommendationHitRate}%`}</strong><small>{metrics.recommendationOutcomes ? `${metrics.recommendationOutcomes} purchases tracked` : "no purchases tracked yet"}</small></article></div><div className="insight-panels"><article><div className="section-title"><h3>Inventory attention</h3><span>{insights.lowStock.length} items</span></div>{insights.lowStock.length ? insights.lowStock.map((product) => <div className="inventory-row" key={product.id}><div><strong>{product.name}</strong><span>{product.category}</span></div><b>{product.inventory} left</b></div>) : <p className="all-clear">All products have healthy stock.</p>}</article><article><div className="section-title"><h3>Recent checkout activity</h3><span>{insights.recentOrders.length} events</span></div>{insights.recentOrders.length ? insights.recentOrders.map((order) => <div className="inventory-row" key={order.checkoutId}><div><strong>{formatPrice(order.amountPaise / 100)}</strong><span>{order.provider}</span></div><b>{order.status}</b></div>) : <p className="all-clear">Checkout activity will appear here.</p>}</article></div></>}</section>;
++    return <section className="admin-view"><div className="view-toolbar"><div><h2>Merchant insights</h2><p>Live operational metrics calculated from catalogue, audit and checkout data.</p></div><button className="secondary-action" type="button" onClick={loadInsights}>Refresh</button></div>{error && <div className="admin-error" role="alert">{error}</div>}{viewLoading || !metrics ? <div className="view-loading">Calculating insights…</div> : <><div className="metric-grid"><article><span>Live products</span><strong>{metrics.products}</strong><small>available to the agent</small></article><article><span>Inventory units</span><strong>{metrics.inventoryUnits}</strong><small>across all products</small></article><article><span>Low-stock items</span><strong>{metrics.lowStock}</strong><small>below 10 units</small></article><article><span>Checkouts</span><strong>{metrics.orders}</strong><small>test and simulated</small></article><article><span>Potential revenue</span><strong>{formatPrice(metrics.potentialRevenue)}</strong><small>excluding cancelled</small></article><article><span>AI sessions</span><strong>{metrics.aiSessions}</strong><small>audited conversations</small></article><article><span>Recommendation hit rate</span><strong>{metrics.recommendationHitRate === null ? "—" : `${metrics.recommendationHitRate}%`}</strong><small>{metrics.recommendationOutcomes ? `${metrics.recommendationOutcomes} purchases tracked` : "no purchases tracked yet"}</small></article><article><span>Gemini usage today</span><strong>{metrics.geminiCallsToday}/{metrics.geminiDailyLimit}</strong><small>{metrics.geminiCallsToday >= metrics.geminiDailyLimit ? "cap reached — using fallback" : "daily cap, resets at UTC midnight"}</small></article></div><div className="insight-panels"><article><div className="section-title"><h3>Inventory attention</h3><span>{insights.lowStock.length} items</span></div>{insights.lowStock.length ? insights.lowStock.map((product) => <div className="inventory-row" key={product.id}><div><strong>{product.name}</strong><span>{product.category}</span></div><b>{product.inventory} left</b></div>) : <p className="all-clear">All products have healthy stock.</p>}</article><article><div className="section-title"><h3>Recent checkout activity</h3><span>{insights.recentOrders.length} events</span></div>{insights.recentOrders.length ? insights.recentOrders.map((order) => <div className="inventory-row" key={order.checkoutId}><div><strong>{formatPrice(order.amountPaise / 100)}</strong><span>{order.provider}</span></div><b>{order.status}</b></div>) : <p className="all-clear">Checkout activity will appear here.</p>}</article></div></>}</section>;
+   }
+ 
+   function renderAudit() {
+diff --git a/lib/audit-store.ts b/lib/audit-store.ts
+index 512a359..cd6fd86 100644
+--- a/lib/audit-store.ts
++++ b/lib/audit-store.ts
+@@ -1,4 +1,4 @@
+-import { and, desc, eq } from "drizzle-orm";
++import { and, desc, eq, gte } from "drizzle-orm";
+ import { getDb } from "../db";
+ import { auditEvents, checkoutEvents } from "../db/schema";
+ import { DEMO_MERCHANT_ID } from "./authz";
+@@ -113,6 +113,41 @@ export async function listRecentAudit(limit = 60, merchantId = DEMO_MERCHANT_ID)
+   }
+ }
+ 
++/**
++ * Counts today's real Gemini calls (UTC day) by reading the audit trail
++ * rather than a separate counter table — keeps the cost-control mechanism
++ * auditable from the same log a merchant already sees.
++ */
++export async function countTodayGeminiCalls(merchantId = DEMO_MERCHANT_ID) {
++  const startOfDay = new Date();
++  startOfDay.setUTCHours(0, 0, 0, 0);
++  const since = startOfDay.toISOString();
++  try {
++    await ensureRuntimeSchema();
++    const db = getDb();
++    const rows = await db
++      .select({ id: auditEvents.id })
++      .from(auditEvents)
++      .where(
++        and(
++          eq(auditEvents.merchantId, merchantId),
++          eq(auditEvents.eventType, "intent.extracted"),
++          eq(auditEvents.engine, "gemini"),
++          gte(auditEvents.createdAt, since),
++        ),
++      );
++    return rows.length;
++  } catch {
++    return fallbackAudit.filter(
++      (event) =>
++        (event.merchantId ?? DEMO_MERCHANT_ID) === merchantId &&
++        event.eventType === "intent.extracted" &&
++        event.engine === "gemini" &&
++        event.createdAt >= since,
++    ).length;
++  }
++}
++
+ export async function saveCheckout(input: {
+   checkoutId: string;
+   merchantId?: string;
+diff --git a/lib/gemini.ts b/lib/gemini.ts
+index fe71e12..69dcb07 100644
+--- a/lib/gemini.ts
++++ b/lib/gemini.ts
+@@ -67,13 +67,16 @@ function isIntent(value: unknown): value is ShoppingIntent {
+   );
+ }
+ 
+-export async function extractShoppingIntent(query: string): Promise<{
++export async function extractShoppingIntent(
++  query: string,
++  options?: { forceRules?: boolean },
++): Promise<{
+   intent: ShoppingIntent;
+   engine: "gemini" | "rules";
+ }> {
+   const apiKey = getRuntimeValue("GEMINI_API_KEY");
+   const model = getRuntimeValue("GEMINI_MODEL") ?? "gemini-3.7-flash";
+-  if (!apiKey) {
++  if (!apiKey || options?.forceRules) {
+     return { intent: extractIntentWithRules(query), engine: "rules" };
+   }
+ 

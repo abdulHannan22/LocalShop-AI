@@ -12,7 +12,7 @@ const statements = [
   `CREATE INDEX IF NOT EXISTS membership_user_idx ON memberships (user_id)`,
   `CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, merchant_id TEXT NOT NULL DEFAULT 'merchant_nova', name TEXT NOT NULL, category TEXT NOT NULL, price INTEGER NOT NULL, rating REAL NOT NULL DEFAULT 4.5, inventory INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', accent TEXT NOT NULL DEFAULT 'lime', image_url TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS product_merchant_idx ON products (merchant_id)`,
-  `CREATE TABLE IF NOT EXISTS shopping_sessions (id TEXT PRIMARY KEY NOT NULL, merchant_id TEXT NOT NULL, customer_email TEXT, query TEXT NOT NULL, intent_json TEXT NOT NULL, engine TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS shopping_sessions (id TEXT PRIMARY KEY NOT NULL, merchant_id TEXT NOT NULL, customer_email TEXT, query TEXT NOT NULL, intent_json TEXT NOT NULL, engine TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', match_quality TEXT, top_product_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS shopping_session_merchant_idx ON shopping_sessions (merchant_id)`,
   `CREATE TABLE IF NOT EXISTS audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, event_id TEXT NOT NULL, merchant_id TEXT NOT NULL DEFAULT 'merchant_nova', session_id TEXT NOT NULL, event_type TEXT NOT NULL, detail TEXT NOT NULL, engine TEXT NOT NULL DEFAULT 'system', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS audit_event_id_idx ON audit_events (event_id)`,
@@ -32,6 +32,8 @@ const statements = [
 const columnMigrations = [
   `ALTER TABLE checkout_events ADD COLUMN customer_id TEXT`,
   `ALTER TABLE products ADD COLUMN image_url TEXT`,
+  `ALTER TABLE shopping_sessions ADD COLUMN match_quality TEXT`,
+  `ALTER TABLE shopping_sessions ADD COLUMN top_product_id INTEGER`,
 ];
 
 export async function ensureRuntimeSchema() {

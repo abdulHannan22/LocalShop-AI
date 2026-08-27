@@ -76,6 +76,8 @@ export const shoppingSessions = sqliteTable(
     intentJson: text("intent_json").notNull(),
     engine: text("engine").notNull(),
     status: text("status").notNull().default("active"),
+    matchQuality: text("match_quality"),
+    topProductId: integer("top_product_id"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [index("shopping_session_merchant_idx").on(table.merchantId)],

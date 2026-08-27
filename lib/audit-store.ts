@@ -1,5 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
-import { getDb } from "../db";
+import { and, desc, eq, gte } from "drizzle-orm";import { getDb } from "../db";
 import { auditEvents, checkoutEvents } from "../db/schema";
 import { DEMO_MERCHANT_ID } from "./authz";
 import { ensureRuntimeSchema } from "./db-init";
@@ -110,6 +109,35 @@ export async function listRecentAudit(limit = 60, merchantId = DEMO_MERCHANT_ID)
       .limit(Math.min(Math.max(limit, 1), 100));
   } catch {
     return fallbackAudit.filter((event) => (event.merchantId ?? DEMO_MERCHANT_ID) === merchantId).slice(-Math.min(Math.max(limit, 1), 100)).reverse();
+  }
+}
+export async function countTodayGeminiCalls(merchantId = DEMO_MERCHANT_ID) {
+  const startOfDay = new Date();
+  startOfDay.setUTCHours(0, 0, 0, 0);
+  const since = startOfDay.toISOString();
+  try {
+    await ensureRuntimeSchema();
+    const db = getDb();
+    const rows = await db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.merchantId, merchantId),
+          eq(auditEvents.eventType, "intent.extracted"),
+          eq(auditEvents.engine, "gemini"),
+          gte(auditEvents.createdAt, since),
+        ),
+      );
+    return rows.length;
+  } catch {
+    return fallbackAudit.filter(
+      (event) =>
+        (event.merchantId ?? DEMO_MERCHANT_ID) === merchantId &&
+        event.eventType === "intent.extracted" &&
+        event.engine === "gemini" &&
+        event.createdAt >= since,
+    ).length;
   }
 }
 

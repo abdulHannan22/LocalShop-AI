@@ -23,7 +23,7 @@ export type RankedProduct = CatalogProduct & {
   score: number;
   reasons: string[];
 };
-
+export type MatchQuality = "strong" | "weak" | "none";
 export const catalog: CatalogProduct[] = [
   {
     id: 1,
@@ -231,4 +231,13 @@ export function rankProducts(
 
 export function getProduct(productId: number) {
   return catalog.find((product) => product.id === productId) ?? null;
+}
+export function assessMatchQuality(products: RankedProduct[]): MatchQuality {
+  if (!products.length) return "none";
+  const genericOnly = (reasons: string[]) =>
+    reasons.every((reason) => reason === "Strong rating" || reason === "Available now");
+
+  const top = products[0];
+  if (genericOnly(top.reasons)) return "none";
+  return top.score >= 50 ? "strong" : "weak";
 }

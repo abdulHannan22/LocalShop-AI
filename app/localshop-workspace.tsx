@@ -73,6 +73,10 @@ type InsightData = {
     orders: number;
     potentialRevenue: number;
     aiSessions: number;
+    recommendationHitRate: number | null;
+    recommendationOutcomes: number;
+    geminiCallsToday: number;
+    geminiDailyLimit: number;
   };
   lowStock: CatalogProduct[];
   recentOrders: Order[];

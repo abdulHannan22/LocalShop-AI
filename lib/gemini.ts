@@ -67,13 +67,16 @@ function isIntent(value: unknown): value is ShoppingIntent {
   );
 }
 
-export async function extractShoppingIntent(query: string): Promise<{
+export async function extractShoppingIntent(
+  query: string,
+  options?: { forceRules?: boolean },
+): Promise<{
   intent: ShoppingIntent;
   engine: "gemini" | "rules";
 }> {
   const apiKey = getRuntimeValue("GEMINI_API_KEY");
   const model = getRuntimeValue("GEMINI_MODEL") ?? "gemini-3.7-flash";
-  if (!apiKey) {
+  if (!apiKey || options?.forceRules) {
     return { intent: extractIntentWithRules(query), engine: "rules" };
   }
 

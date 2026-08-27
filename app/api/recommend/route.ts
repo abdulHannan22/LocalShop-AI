@@ -1,8 +1,9 @@
-import { saveAudit } from "../../../lib/audit-store";
-import { rankProducts } from "../../../lib/catalog";
+import { countTodayGeminiCalls, saveAudit } from "../../../lib/audit-store";
+import { assessMatchQuality, rankProducts } from "../../../lib/catalog";
 import { extractShoppingIntent } from "../../../lib/gemini";
 import { listProducts } from "../../../lib/product-store";
 import { getActor, resolveMerchantBySlug } from "../../../lib/authz";
+import { getRuntimeValue } from "../../../lib/runtime-env";
 import { saveShoppingSession } from "../../../lib/session-store";
 
 export async function POST(request: Request) {
@@ -29,9 +30,19 @@ export async function POST(request: Request) {
       ? { id: actor.merchantId }
       : null;
   if (!merchant) return Response.json({ error: "A valid store is required." }, { status: 404 });
-  const { intent, engine } = await extractShoppingIntent(query);
+
+  // Cost control: cap real Gemini calls per merchant per UTC day. Once hit,
+  // requests keep working via the deterministic fallback instead of failing
+  // or silently racking up cost — same graceful-degradation shape used for
+  // Razorpay and transactional email elsewhere in the app.
+  const geminiDailyLimit = Number(getRuntimeValue("GEMINI_DAILY_LIMIT") ?? "200");
+  const geminiCallsToday = await countTodayGeminiCalls(merchant.id);
+  const rateLimited = geminiCallsToday >= geminiDailyLimit;
+
+  const { intent, engine } = await extractShoppingIntent(query, { forceRules: rateLimited });
   const catalogue = await listProducts(merchant.id);
   const products = rankProducts(intent, catalogue);
+  const matchQuality = assessMatchQuality(products);
   const audit = [
     { event: "intent.extracted", detail: intent.explanation, engine },
     {
@@ -44,6 +55,23 @@ export async function POST(request: Request) {
       detail: "Out-of-stock products removed",
       engine: "rules",
     },
+    {
+      event: "match.assessed",
+      detail:
+        matchQuality === "none"
+          ? "No confident match — falling back to browsing"
+          : `Match quality: ${matchQuality}`,
+      engine: "rules",
+    },
+    ...(rateLimited
+      ? [
+          {
+            event: "gemini.rate_limited",
+            detail: `Daily Gemini cap (${geminiDailyLimit}) reached — used deterministic fallback instead`,
+            engine: "system",
+          },
+        ]
+      : []),
   ];
 
   await Promise.all(
@@ -65,7 +93,9 @@ export async function POST(request: Request) {
     query,
     intent,
     engine,
+    matchQuality,
+    topProductId: matchQuality === "none" ? null : products[0]?.id ?? null,
   });
 
-  return Response.json({ sessionId, query, intent, engine, products, audit });
+  return Response.json({ sessionId, query, intent, engine, products, matchQuality, audit });
 }
