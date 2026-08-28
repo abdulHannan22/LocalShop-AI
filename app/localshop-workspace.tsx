@@ -100,6 +100,7 @@ const initialIntent: ShoppingIntent = {
   useCase: "online classes",
   features: ["wireless", "microphone"],
   explanation: "Prioritised headphones, online classes, wireless audio, a clear microphone, and a ₹2,000 budget.",
+  language: "en",
 };
 
 const initialProducts: RankedProduct[] = catalog.slice(0, 3).map((product, index) => ({
@@ -431,7 +432,29 @@ export function LocalShopWorkspace() {
   return (
     <main className="app-shell">
       <aside className="sidebar"><div className="brand-row"><div className="brand-mark" aria-hidden="true">L</div><div><p className="brand-name">LocalShop AI</p><p className="brand-caption">Merchant workspace</p></div></div><nav className="side-nav" aria-label="Primary navigation">{visibleNavItems.map((item) => <button className={`nav-item ${tab === item.id ? "active" : ""}`} type="button" key={item.id} onClick={() => setTab(item.id)}><span>{item.icon}</span>{item.label}</button>)}</nav><div className="merchant-card"><div className="merchant-avatar">{(status?.actor?.merchantName ?? "Nova Store").slice(0, 2).toUpperCase()}</div><div><p>{status?.actor?.merchantName ?? "Nova Store"}</p><span>{status?.actor?.role ?? "merchant"} · {catalogueProducts.length} products</span></div><button type="button" aria-label="Open settings" onClick={() => setShowSettings(true)}>•••</button></div></aside>
-      <section className="workspace"><header className="topbar"><div><p className="eyebrow">{viewCopy[tab].eyebrow}</p><h1>{viewCopy[tab].title}</h1></div><div className="status-cluster"><a className="workspace-link" href={`/store/${status?.actor?.merchantSlug ?? "nova-store"}`}>Customer store</a>{status?.actor?.platformRole === "platform_admin" && <a className="workspace-link" href="/admin">Platform admin</a>}<span className="mode-pill"><i /> {status?.integrations.razorpay ? "Razorpay connected" : "Safe simulation mode"}</span><button className="settings-button" type="button" aria-label="Settings" onClick={() => setShowSettings(true)}>⚙</button></div></header>{tab === "sales" ? renderSales() : tab === "catalogue" ? renderCatalogue() : tab === "orders" ? renderOrders() : tab === "insights" ? renderInsights() : tab === "staff" ? renderStaff() : renderAudit()}<footer className="audit-strip"><div><span className="pulse" /><strong>{notice}</strong></div><div className="audit-events">{auditEvents.slice(-3).map((event, index) => <span key={`${event}-${index}`}>{labelEvent(event)}</span>)}<button type="button" onClick={() => setTab("audit")}>Open audit trail →</button></div></footer></section>
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">{viewCopy[tab].eyebrow}</p>
+            <h1>{viewCopy[tab].title}</h1>
+          </div>
+          <div className="status-cluster">
+            <a className="workspace-link" href={`/store/${status?.actor?.merchantSlug ?? "nova-store"}`}>Customer store</a>
+            {status?.actor?.platformRole === "platform_admin" ? <a className="workspace-link" href="/admin">Platform admin</a> : null}
+            <span className="mode-pill"><i /> {status?.integrations.razorpay ? "Razorpay connected" : "Safe simulation mode"}</span>
+            <button className="workspace-link" type="button" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }).catch(() => null); window.location.href = "/"; }}>Sign out</button>
+            <button className="settings-button" type="button" aria-label="Settings" onClick={() => setShowSettings(true)}>⚙</button>
+          </div>
+        </header>
+        {tab === "sales" ? renderSales() : tab === "catalogue" ? renderCatalogue() : tab === "orders" ? renderOrders() : tab === "insights" ? renderInsights() : tab === "staff" ? renderStaff() : renderAudit()}
+        <footer className="audit-strip">
+          <div><span className="pulse" /><strong>{notice}</strong></div>
+          <div className="audit-events">
+            {auditEvents.slice(-3).map((event, index) => <span key={`${event}-${index}`}>{labelEvent(event)}</span>)}
+            <button type="button" onClick={() => setTab("audit")}>Open audit trail →</button>
+          </div>
+        </footer>
+      </section>
       {showSettings && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSettings(false)}><section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><p className="eyebrow">Runtime status</p><h2 id="settings-title">Account and integrations</h2></div><button type="button" aria-label="Close settings" onClick={() => setShowSettings(false)}>×</button></div>{status?.actor && <p className="identity-note"><strong>{status.actor.name}</strong><span>{status.actor.email} · {status.actor.role ?? status.actor.platformRole}</span></p>}<div className="integration-list"><article><span className={status?.integrations.gemini ? "connected" : "fallback"} /><div><strong>Gemini intent extraction</strong><p>{status?.integrations.gemini ? "API key configured" : "Using deterministic fallback"}</p></div></article><article><span className={status?.integrations.razorpay ? "connected" : "fallback"} /><div><strong>Razorpay checkout</strong><p>{status?.integrations.razorpay ? "Test credentials configured" : "Using checkout simulation"}</p></div></article><article><span className={status?.integrations.webhook ? "connected" : "fallback"} /><div><strong>Webhook verification</strong><p>{status?.integrations.webhook ? "Signing secret configured" : "Add a webhook secret when needed"}</p></div></article></div><p className="storage-note"><strong>Storage:</strong> {status?.storage ?? "Checking…"}</p><button className="primary-action" type="button" onClick={() => setShowSettings(false)}>Done</button></section></div>}
     </main>
   );

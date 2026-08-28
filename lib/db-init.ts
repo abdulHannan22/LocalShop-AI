@@ -5,7 +5,7 @@ let schemaReady: Promise<void> | null = null;
 const statements = [
   `CREATE TABLE IF NOT EXISTS merchants (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, slug TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS merchant_slug_idx ON merchants (slug)`,
-  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY NOT NULL, email TEXT NOT NULL, name TEXT, platform_role TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY NOT NULL, email TEXT NOT NULL, name TEXT, platform_role TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'active', password_hash TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS user_email_idx ON users (email)`,
   `CREATE TABLE IF NOT EXISTS memberships (id TEXT PRIMARY KEY NOT NULL, merchant_id TEXT NOT NULL, user_id TEXT, email TEXT NOT NULL, role TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'invited', invited_by TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS membership_merchant_email_idx ON memberships (merchant_id, email)`,
@@ -24,6 +24,8 @@ const statements = [
   `CREATE UNIQUE INDEX IF NOT EXISTS customer_email_idx ON customers (email)`,
   `CREATE TABLE IF NOT EXISTS customer_otps (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, email TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS customer_otp_email_idx ON customer_otps (email)`,
+  `CREATE TABLE IF NOT EXISTS merchant_password_resets (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, email TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE INDEX IF NOT EXISTS merchant_password_reset_email_idx ON merchant_password_resets (email)`,
 ];
 
 // Columns added after the initial release. SQLite has no
@@ -34,6 +36,7 @@ const columnMigrations = [
   `ALTER TABLE products ADD COLUMN image_url TEXT`,
   `ALTER TABLE shopping_sessions ADD COLUMN match_quality TEXT`,
   `ALTER TABLE shopping_sessions ADD COLUMN top_product_id INTEGER`,
+  `ALTER TABLE users ADD COLUMN password_hash TEXT`,
 ];
 
 export async function ensureRuntimeSchema() {

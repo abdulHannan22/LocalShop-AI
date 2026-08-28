@@ -4,6 +4,7 @@ export type ShoppingIntent = {
   useCase: string;
   features: string[];
   explanation: string;
+  language: string;
 };
 
 export type CatalogProduct = {
@@ -23,7 +24,9 @@ export type RankedProduct = CatalogProduct & {
   score: number;
   reasons: string[];
 };
+
 export type MatchQuality = "strong" | "weak" | "none";
+
 export const catalog: CatalogProduct[] = [
   {
     id: 1,
@@ -126,44 +129,134 @@ const knownFeatures = [
   "fast charging",
 ];
 
+// Category, use-case and feature terms in Hindi (Devanagari) and common
+// Hinglish (Romanized Hindi) spellings, mapped to the same English
+// canonical terms used against the catalogue. Keeps the deterministic
+// fallback usable for Hindi/Hinglish queries even without Gemini.
+const categoryTranslations: Record<string, string> = {
+  "हेडफोन": "headphones",
+  hedfon: "headphones",
+  headfone: "headphones",
+  "हेडसेट": "headset",
+  "इयरबड्स": "earbuds",
+  earbud: "earbuds",
+  "माउस": "mouse",
+  "लैंप": "lamp",
+  "चार्जर": "charger",
+  charjar: "charger",
+  "केस": "case",
+  "कवर": "case",
+};
+
+const useCaseTranslations: Record<string, string> = {
+  "क्लास": "online classes",
+  "पढ़ाई": "study",
+  padhai: "study",
+  "यात्रा": "travel",
+  safar: "travel",
+  "सफर": "travel",
+  "गेमिंग": "gaming",
+  "गाना": "music",
+  sangeet: "music",
+  "तोहफा": "gift",
+  tohfa: "gift",
+  "कॉल": "calls",
+};
+
+const featureTranslations: Record<string, string> = {
+  "वायरलेस": "wireless",
+  "माइक": "microphone",
+  "हल्का": "lightweight",
+  halka: "lightweight",
+  "कॉम्पैक्ट": "compact",
+};
+
+function detectLanguage(query: string): string {
+  if (/[\u0900-\u097F]/.test(query)) return "hi";
+  const hinglishMarkers = [
+    "hazar",
+    "hazaar",
+    "rupaye",
+    "rupees",
+    "chahiye",
+    "ke liye",
+    "ke andar",
+    "tak chahiye",
+    "sasta",
+    "accha",
+    "wala",
+  ];
+  const normalized = query.toLowerCase();
+  return hinglishMarkers.some((marker) => normalized.includes(marker)) ? "hinglish" : "en";
+}
+
+function translateTerm(normalized: string, dictionary: Record<string, string>): string | null {
+  for (const [source, target] of Object.entries(dictionary)) {
+    if (normalized.includes(source.toLowerCase())) return target;
+  }
+  return null;
+}
+
 export function extractIntentWithRules(query: string): ShoppingIntent {
   const normalized = query.toLowerCase();
+  const language = detectLanguage(query);
+
   const budgetMatch = normalized.match(
     /(?:under|below|within|up to|max(?:imum)?)\s*₹?\s*([\d,]+)/i,
   );
+  // Hinglish/Hindi budget phrasing: "2 hazar tak", "1500 ke andar",
+  // "1500 रुपये के अंदर", "2000 तक" etc.
+  const hazarMatch = normalized.match(/([\d,]+)\s*(?:hazar|hazaar)\b/i);
+  const hindiBudgetMarkers = ["ke andar", "के अंदर", "तक", "se kam", "ke niche", "ke under"];
+  const hasHindiBudgetMarker = hindiBudgetMarkers.some((marker) => normalized.includes(marker));
+  const firstNumberMatch = normalized.match(/([\d,]{2,})/);
   const budget = budgetMatch
     ? Number(budgetMatch[1].replace(/,/g, ""))
-    : null;
+    : hazarMatch
+      ? Number(hazarMatch[1].replace(/,/g, "")) * 1000
+      : hasHindiBudgetMarker && firstNumberMatch
+        ? Number(firstNumberMatch[1].replace(/,/g, ""))
+        : null;
 
-  const useCase = [
-    "online classes",
-    "daily travel",
-    "travel",
-    "gaming",
-    "music",
-    "study",
-    "gift",
-    "calls",
-  ].find((value) => normalized.includes(value)) ?? "general use";
+  const useCase =
+    [
+      "online classes",
+      "daily travel",
+      "travel",
+      "gaming",
+      "music",
+      "study",
+      "gift",
+      "calls",
+    ].find((value) => normalized.includes(value)) ??
+    translateTerm(normalized, useCaseTranslations) ??
+    "general use";
 
-  const category = [
-    "headphones",
-    "headset",
-    "earbuds",
-    "mouse",
-    "lamp",
-    "charger",
-    "case",
-  ].find((value) => normalized.includes(value)) ?? "technology accessory";
+  const category =
+    [
+      "headphones",
+      "headset",
+      "earbuds",
+      "mouse",
+      "lamp",
+      "charger",
+      "case",
+    ].find((value) => normalized.includes(value)) ??
+    translateTerm(normalized, categoryTranslations) ??
+    "technology accessory";
 
   const features = knownFeatures.filter((feature) =>
     normalized.includes(feature),
   );
+  const translatedFeature = translateTerm(normalized, featureTranslations);
+  if (translatedFeature && !features.includes(translatedFeature)) {
+    features.push(translatedFeature);
+  }
 
-  if (normalized.includes("class") && !features.includes("microphone")) {
+  if ((normalized.includes("class") || normalized.includes("क्लास")) && !features.includes("microphone")) {
     features.push("microphone");
   }
-  if (normalized.includes("travel") && !features.includes("compact")) {
+  if ((normalized.includes("travel") || normalized.includes("यात्रा") || normalized.includes("safar")) && !features.includes("compact")) {
     features.push("compact");
   }
 
@@ -175,6 +268,7 @@ export function extractIntentWithRules(query: string): ShoppingIntent {
     explanation: `Prioritised ${category}, ${useCase}, ${
       features.length ? features.join(", ") : "reliable everyday use"
     }${budget ? `, and a budget of ₹${budget.toLocaleString("en-IN")}` : ""}.`,
+    language,
   };
 }
 
@@ -232,6 +326,13 @@ export function rankProducts(
 export function getProduct(productId: number) {
   return catalog.find((product) => product.id === productId) ?? null;
 }
+
+/**
+ * Judges how confident a set of ranked products actually is, rather than
+ * always presenting the top 3 as if they were a strong match. A product
+ * only counts as real signal if it matched on something beyond the
+ * baseline rating (budget, category, use case, or a stated feature).
+ */
 export function assessMatchQuality(products: RankedProduct[]): MatchQuality {
   if (!products.length) return "none";
   const genericOnly = (reasons: string[]) =>

@@ -697,6 +697,7 @@ button { cursor: pointer; }
 .store-intent { max-width: 760px; margin-top: 14px; padding: 13px; border-radius: 11px; background: #e5f2df; }
 .store-intent strong { color: #356141; font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
 .store-intent p { margin: 6px 0 0 !important; font-size: 10px !important; }
+.store-language-badge { margin-left: 7px; padding: 2px 7px; border-radius: 999px; background: #356141; color: #fff; font-size: 8px; letter-spacing: 0; text-transform: none; }
 .store-error { max-width: 760px; margin-top: 12px; padding: 11px; border: 1px solid #efc5bf; border-radius: 9px; background: #fff4f2; color: #8b332a; font-size: 10px; }
 .store-account-toggle { padding: 7px 14px; border: 1px solid #dce4d8; border-radius: 999px; background: #fff; color: var(--ink); font-size: 10px; font-weight: 800; cursor: pointer; }
 .store-account-panel { padding: 20px clamp(20px, 6vw, 80px); border-bottom: 1px solid var(--line); background: #f7f8f4; }
@@ -1003,3 +1004,32 @@ button { cursor: pointer; }
   .product-form .wide-field { grid-column: auto; }
   .audit-card footer { display: grid; }
 }
+
+/* Landing page: merchant/shopper choice, signup, login */
+.landing-shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; background: #f4f6f1; font-family: inherit; }
+.landing-loading { color: #667169; font-size: 12px; }
+.landing-card { width: 100%; max-width: 420px; padding: 32px; border: 1px solid #dfe5dc; border-radius: 20px; background: #fff; box-shadow: 0 20px 60px rgba(20, 30, 20, .06); }
+.landing-card h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -.03em; }
+.landing-card > p { margin: 0 0 22px; color: #667169; font-size: 12px; }
+.landing-back { margin-bottom: 16px; padding: 0; border: 0; background: none; color: #52645a; font-size: 10px; font-weight: 800; cursor: pointer; }
+.landing-choose { text-align: center; }
+.landing-paths { display: grid; gap: 12px; margin-top: 20px; }
+.landing-path { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; padding: 16px 18px; border: 1px solid #dfe5dc; border-radius: 14px; background: #fafbf8; cursor: pointer; text-align: left; transition: .15s ease; }
+.landing-path:hover { border-color: #4f805c; background: #f0f6ee; }
+.landing-path strong { font-size: 13px; }
+.landing-path span { font-size: 10px; color: #667169; }
+.landing-card form { display: grid; gap: 14px; }
+.landing-card form label { display: grid; gap: 6px; font-size: 10px; font-weight: 800; color: #52645a; text-transform: uppercase; letter-spacing: .05em; }
+.landing-card form input { height: 42px; padding: 0 13px; border: 1px solid #dfe5dc; border-radius: 10px; font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: 0; color: #14231a; }
+.landing-slug { display: flex; align-items: center; height: 42px; border: 1px solid #dfe5dc; border-radius: 10px; padding: 0 13px; gap: 2px; }
+.landing-slug span { color: #8b948e; font-size: 12px; }
+.landing-slug input { flex: 1; height: auto; border: 0; padding: 0; }
+.landing-card form button[type="submit"] { height: 44px; border: 0; border-radius: 10px; background: var(--forest); color: #fff; font-size: 12px; font-weight: 800; cursor: pointer; }
+.landing-error { padding: 10px 12px; border: 1px solid #efc5bf; border-radius: 9px; background: #fff4f2; color: #8b332a; font-size: 10px; }
+.landing-switch { margin: 18px 0 0; text-align: center; font-size: 11px; color: #667169; }
+.landing-switch button { border: 0; background: none; color: #356141; font-weight: 800; cursor: pointer; padding: 0 0 0 4px; }
+.landing-store-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.landing-store-list a { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border: 1px solid #dfe5dc; border-radius: 12px; text-decoration: none; color: #14231a; transition: .15s ease; }
+.landing-store-list a:hover { border-color: #4f805c; background: #f0f6ee; }
+.landing-store-list span { font-size: 10px; color: #52645a; font-weight: 800; }
+.landing-reset-message { margin: -8px 0 18px; padding: 11px 14px; border: 1px solid #cfe3d0; border-radius: 10px; background: #eef7ee; color: #356141; font-size: 11px; }

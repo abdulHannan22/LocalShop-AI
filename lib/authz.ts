@@ -3,6 +3,7 @@ import { getDb } from "../db";
 import { memberships, merchants, users } from "../db/schema";
 import { getRuntimeValue } from "./runtime-env";
 import { ensureRuntimeSchema } from "./db-init";
+import { resolveMerchantSessionIdentity } from "./merchant-auth";
 
 export const DEMO_MERCHANT_ID = "merchant_nova";
 export const DEMO_STORE_SLUG = "nova-store";
@@ -53,7 +54,13 @@ let fallbackMerchants = [
   { id: DEMO_MERCHANT_ID, name: "Nova Store", slug: DEMO_STORE_SLUG, status: "active", createdAt: "", updatedAt: "" },
 ];
 
-function identityFromRequest(request: Request) {
+async function identityFromRequest(request: Request) {
+  // Self-serve merchant signup/login (cookie-based) takes priority when
+  // present, so a person who signed up directly doesn't need the hosted
+  // platform's trusted-header identity to use their own account.
+  const sessionIdentity = await resolveMerchantSessionIdentity(request);
+  if (sessionIdentity) return sessionIdentity;
+
   const emailHeader = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
   const encodedName = request.headers.get("oai-authenticated-user-full-name");
   let name = emailHeader ?? "Local developer";
@@ -61,7 +68,7 @@ function identityFromRequest(request: Request) {
     try { name = decodeURIComponent(encodedName); } catch { /* use email fallback */ }
   }
   if (emailHeader) return { email: emailHeader, name };
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && getRuntimeValue("DEV_AUTOLOGIN") === "true") {
     const email = (getRuntimeValue("DEV_USER_EMAIL") ?? "owner@nova.local").toLowerCase();
     return { email, name: getRuntimeValue("DEV_USER_NAME") ?? "Nova Store Owner" };
   }
@@ -93,7 +100,7 @@ export async function resolveMerchantBySlug(slug: string) {
 }
 
 export async function getActor(request: Request): Promise<Actor | null> {
-  const identity = identityFromRequest(request);
+  const identity = await identityFromRequest(request);
   if (!identity) return null;
   const userId = `usr_${await sha256(identity.email)}`;
   try {
@@ -106,15 +113,9 @@ export async function getActor(request: Request): Promise<Actor | null> {
       target: users.email,
       set: { name: identity.name, lastSeenAt: new Date().toISOString(), ...(configuredAdmin(identity.email) ? { platformRole: "platform_admin" } : {}) },
     });
-    let [membership] = await db.select().from(memberships).where(eq(memberships.email, identity.email)).limit(1);
-    if (!membership && firstUser) {
-      const membershipId = crypto.randomUUID();
-      await db.insert(memberships).values({ id: membershipId, merchantId: DEMO_MERCHANT_ID, userId, email: identity.email, role: "owner", status: "active" });
-      [membership] = await db.select().from(memberships).where(eq(memberships.id, membershipId)).limit(1);
-    } else if (membership && (!membership.userId || membership.status === "invited")) {
-      await db.update(memberships).set({ userId, status: "active" }).where(eq(memberships.id, membership.id));
-      membership = { ...membership, userId, status: "active" };
-    }
+    // Membership comes only from an explicit signup or staff invite now —
+    // no auto-provisioning as owner of the demo merchant.
+    const [membership] = await db.select().from(memberships).where(eq(memberships.email, identity.email)).limit(1);
     const [user] = await db.select().from(users).where(eq(users.email, identity.email)).limit(1);
     const [merchant] = membership
       ? await db.select().from(merchants).where(eq(merchants.id, membership.merchantId)).limit(1)
@@ -136,23 +137,17 @@ export async function getActor(request: Request): Promise<Actor | null> {
       user = { id: userId, email: identity.email, name: identity.name, platformRole: configuredAdmin(identity.email) || firstUser ? "platform_admin" : "user", status: "active" };
       fallbackUsers.set(identity.email, user);
     }
-    let membership = fallbackMemberships.find((item) => item.email === identity.email);
-    if (!membership && firstUser) {
-      membership = { id: crypto.randomUUID(), merchantId: DEMO_MERCHANT_ID, userId, email: identity.email, role: "owner", status: "active", invitedBy: null, createdAt: new Date().toISOString() };
-      fallbackMemberships.push(membership);
-    } else if (membership && !membership.userId) {
-      membership.userId = userId;
-      membership.status = "active";
-    }
+    const membership = fallbackMemberships.find((item) => item.email === identity.email);
+    const merchant = membership ? fallbackMerchants.find((item) => item.id === membership.merchantId) : undefined;
     return {
       userId,
       email: identity.email,
       name: identity.name,
       platformRole: user.platformRole,
       merchantId: membership?.merchantId ?? null,
-      merchantName: membership ? "Nova Store" : null,
-      merchantSlug: membership ? DEMO_STORE_SLUG : null,
-      role: membership?.role ?? null,
+      merchantName: merchant?.name ?? null,
+      merchantSlug: merchant?.slug ?? null,
+      role: (membership?.role as MerchantRole | undefined) ?? null,
     };
   }
 }

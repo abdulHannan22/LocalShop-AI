@@ -22,6 +22,7 @@ export const users = sqliteTable(
     name: text("name"),
     platformRole: text("platform_role").notNull().default("user"),
     status: text("status").notNull().default("active"),
+    passwordHash: text("password_hash"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -148,4 +149,17 @@ export const customerOtps = sqliteTable(
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [index("customer_otp_email_idx").on(table.email)],
+);
+
+export const merchantPasswordResets = sqliteTable(
+  "merchant_password_resets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    consumed: integer("consumed").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("merchant_password_reset_email_idx").on(table.email)],
 );

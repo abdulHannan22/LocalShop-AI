@@ -12,24 +12,31 @@ const intentSchema = {
     },
     category: {
       type: "string",
-      description: "Short product category requested by the customer.",
+      description:
+        "Short product category requested by the customer, translated to English so it matches an English-language catalogue even if the request was in Hindi or Hinglish.",
     },
     useCase: {
       type: "string",
-      description: "The main situation in which the product will be used.",
+      description:
+        "The main situation in which the product will be used, in English.",
     },
     features: {
       type: "array",
       items: { type: "string" },
       maxItems: 6,
-      description: "Important customer preferences stated or strongly implied.",
+      description: "Important customer preferences stated or strongly implied, in English.",
     },
     explanation: {
       type: "string",
-      description: "One short sentence explaining the extracted intent.",
+      description: "One short sentence explaining the extracted intent, in English.",
+    },
+    language: {
+      type: "string",
+      description:
+        "The language the customer wrote in: 'en' for English, 'hi' for Hindi (Devanagari script), or 'hinglish' for Romanized Hindi.",
     },
   },
-  required: ["budget", "category", "useCase", "features", "explanation"],
+  required: ["budget", "category", "useCase", "features", "explanation", "language"],
   additionalProperties: false,
 };
 
@@ -63,7 +70,8 @@ function isIntent(value: unknown): value is ShoppingIntent {
     typeof candidate.useCase === "string" &&
     Array.isArray(candidate.features) &&
     candidate.features.every((feature) => typeof feature === "string") &&
-    typeof candidate.explanation === "string"
+    typeof candidate.explanation === "string" &&
+    typeof candidate.language === "string"
   );
 }
 
@@ -91,7 +99,7 @@ export async function extractShoppingIntent(
         },
         body: JSON.stringify({
           model,
-          input: `Extract shopping intent from this customer request. Do not invent a budget or feature. Request: ${query}`,
+          input: `Extract shopping intent from this customer request. The customer may write in English, Hindi (Devanagari script), or Hinglish (Romanized Hindi). Detect which language they used. Regardless of the input language, return category, useCase, features and explanation in English so they match an English-language catalogue. Do not invent a budget or feature. Request: ${query}`,
           response_format: {
             type: "text",
             mime_type: "application/json",

@@ -1,5 +1,5 @@
-import { LocalShopWorkspace } from "./localshop-workspace";
+import { Landing } from "./landing";
 
 export default function Home() {
-  return <LocalShopWorkspace />;
+  return <Landing />;
 }
