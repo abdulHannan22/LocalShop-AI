@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { LocalShopWorkspace } from "./localshop-workspace";
 
 type Store = { name: string; slug: string };
-type Mode = "checking" | "choose" | "merchant-login" | "merchant-signup" | "merchant-reset-request" | "merchant-reset-confirm" | "shopper" | "workspace";
+type Mode = "checking" | "choose" | "merchant-login" | "merchant-signup" | "merchant-reset-request" | "merchant-reset-confirm" | "workspace";
 
 export function Landing() {
   const [mode, setMode] = useState<Mode>("checking");
@@ -26,6 +26,7 @@ export function Landing() {
   const [resetCode, setResetCode] = useState("");
   const [resetNewPassword, setResetNewPassword] = useState("");
   const [resetMessage, setResetMessage] = useState("");
+  const [showStores, setShowStores] = useState(false);
 
   useEffect(() => {
     fetch("/api/me")
@@ -137,35 +138,6 @@ export function Landing() {
     return <LocalShopWorkspace />;
   }
 
-  if (mode === "shopper") {
-    if (!stores.length && !storesLoading) loadStores();
-    return (
-      <main className="landing-shell">
-        <div className="landing-card">
-          <button type="button" className="landing-back" onClick={() => setMode("choose")}>← Back</button>
-          <h1>Find a store</h1>
-          <p>Pick a store to start shopping with its AI assistant.</p>
-          {storesLoading ? (
-            <p className="landing-loading">Loading stores…</p>
-          ) : stores.length === 0 ? (
-            <p className="landing-loading">No active stores yet — be the first to open one.</p>
-          ) : (
-            <ul className="landing-store-list">
-              {stores.map((store) => (
-                <li key={store.slug}>
-                  <a href={`/store/${store.slug}`}>
-                    <strong>{store.name}</strong>
-                    <span>Visit store →</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </main>
-    );
-  }
-
   if (mode === "merchant-login") {
     return (
       <main className="landing-shell">
@@ -251,11 +223,39 @@ export function Landing() {
             <strong>I&apos;m a merchant</strong>
             <span>Sign in or open your store</span>
           </button>
-          <button type="button" className="landing-path" onClick={() => setMode("shopper")}>
+          <button
+            type="button"
+            className={`landing-path ${showStores ? "landing-path-active" : ""}`}
+            onClick={() => {
+              const next = !showStores;
+              setShowStores(next);
+              if (next && !stores.length && !storesLoading) loadStores();
+            }}
+          >
             <strong>I&apos;m a shopper</strong>
             <span>Browse stores and shop with AI</span>
           </button>
         </div>
+        {showStores && (
+          <div className="landing-store-panel">
+            {storesLoading ? (
+              <p className="landing-loading">Loading stores…</p>
+            ) : stores.length === 0 ? (
+              <p className="landing-loading">No active stores yet — be the first to open one.</p>
+            ) : (
+              <ul className="landing-store-list">
+                {stores.map((store) => (
+                  <li key={store.slug}>
+                    <a href={`/store/${store.slug}`}>
+                      <strong>{store.name}</strong>
+                      <span>Visit store →</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </main>
   );
