@@ -282,7 +282,10 @@ export function rankProducts(
   return source
     .filter((product) => product.inventory > 0)
     .map((product) => {
-      const haystack = `${product.category} ${product.tags.join(" ")}`.toLowerCase();
+      // Include the product name itself, not just category/tags — a query
+      // for "moong dal" should match a product literally named "Moong Dal
+      // 1kg" even if its category/tags use a different word (e.g. "Pulses").
+      const haystack = `${product.name} ${product.category} ${product.tags.join(" ")}`.toLowerCase();
       const reasons: string[] = [];
       let score = product.rating * 6;
 
@@ -293,7 +296,14 @@ export function rankProducts(
         score -= Math.min(30, ((product.price - intent.budget) / intent.budget) * 50);
       }
 
-      if (categoryTokens.some((token) => token.length > 3 && haystack.includes(token))) {
+      // Whole-phrase match first (handles multi-word categories exactly),
+      // then fall back to individual tokens of at least 3 characters so
+      // short-but-meaningful words like "dal", "oil", "tea" aren't dropped.
+      const categoryPhrase = intent.category.toLowerCase().trim();
+      const categoryMatched =
+        (categoryPhrase.length > 2 && haystack.includes(categoryPhrase)) ||
+        categoryTokens.some((token) => token.length >= 3 && haystack.includes(token));
+      if (categoryMatched) {
         score += 24;
         reasons.push("Category match");
       }
