@@ -13,29 +13,33 @@ export async function GET(request: Request) {
     countTodayGeminiCalls(actor.merchantId),
   ]);
   const geminiDailyLimit = Number(getRuntimeValue("GEMINI_DAILY_LIMIT") ?? "200");
-  const inventoryUnits = products.reduce((sum, product) => sum + product.inventory, 0);
-  const revenuePaise = orders
-    .filter((order) => order.status !== "cancelled")
-    .reduce((sum, order) => sum + order.amountPaise, 0);
 
-  const hits = audit.filter((event) => event.eventType === "recommendation.hit").length;
-  const misses = audit.filter((event) => event.eventType === "recommendation.miss").length;
+  type OrderRow = (typeof orders)[number];
+  type AuditRow = (typeof audit)[number];
+
+  const inventoryUnits = products.reduce((sum: number, p) => sum + p.inventory, 0);
+  const revenuePaise = orders
+    .filter((o: OrderRow) => o.status !== "cancelled")
+    .reduce((sum: number, o: OrderRow) => sum + o.amountPaise, 0);
+
+  const hits = audit.filter((e: AuditRow) => e.eventType === "recommendation.hit").length;
+  const misses = audit.filter((e: AuditRow) => e.eventType === "recommendation.miss").length;
   const recommendationOutcomes = hits + misses;
 
   return Response.json({
     metrics: {
       products: products.length,
       inventoryUnits,
-      lowStock: products.filter((product) => product.inventory < 10).length,
+      lowStock: products.filter((p) => p.inventory < 10).length,
       orders: orders.length,
       potentialRevenue: Math.round(revenuePaise / 100),
-      aiSessions: new Set(audit.map((event) => event.sessionId)).size,
+      aiSessions: new Set(audit.map((e: AuditRow) => e.sessionId)).size,
       recommendationHitRate: recommendationOutcomes ? Math.round((hits / recommendationOutcomes) * 100) : null,
       recommendationOutcomes,
       geminiCallsToday,
       geminiDailyLimit,
     },
-    lowStock: products.filter((product) => product.inventory < 10).sort((a, b) => a.inventory - b.inventory),
+    lowStock: products.filter((p) => p.inventory < 10).sort((a, b) => a.inventory - b.inventory),
     recentOrders: orders.slice(0, 5),
   });
 }

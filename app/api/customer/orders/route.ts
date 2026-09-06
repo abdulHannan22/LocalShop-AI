@@ -1,6 +1,4 @@
-import { inArray } from "drizzle-orm";
-import { getDb } from "../../../../db";
-import { merchants, products } from "../../../../db/schema";
+import { prisma } from "../../../../lib/prisma";
 import { listCheckoutsForCustomer } from "../../../../lib/audit-store";
 import { resolveCustomer } from "../../../../lib/customer-auth";
 
@@ -14,27 +12,19 @@ export async function GET(request: Request) {
 
   const orders = await listCheckoutsForCustomer(customer.id);
 
-  // Best-effort enrichment with product/store names; falls back to bare
-  // order data (still fully usable) if D1 is unavailable.
-  let productNames = new Map<number, string>();
-  let merchantNames = new Map<string, { name: string; slug: string }>();
-  try {
-    const db = getDb();
-    const productIds = [...new Set(orders.map((order) => order.productId))];
-    const merchantIds = [...new Set(orders.map((order) => order.merchantId))];
-    if (productIds.length) {
-      const rows = await db.select({ id: products.id, name: products.name }).from(products).where(inArray(products.id, productIds));
-      productNames = new Map(rows.map((row) => [row.id, row.name]));
-    }
-    if (merchantIds.length) {
-      const rows = await db.select({ id: merchants.id, name: merchants.name, slug: merchants.slug }).from(merchants).where(inArray(merchants.id, merchantIds));
-      merchantNames = new Map(rows.map((row) => [row.id, { name: row.name, slug: row.slug }]));
-    }
-  } catch {
-    // fallback mode — leave names blank, the client shows the order number instead
-  }
+  const productIds = [...new Set(orders.map((o: { productId: number }) => o.productId))];
+  const merchantIds = [...new Set(orders.map((o: { merchantId: string }) => o.merchantId))];
 
-  const enriched = orders.map((order) => ({
+  const [productRows, merchantRows] = await Promise.all([
+    productIds.length ? prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, name: true } }) : [],
+    merchantIds.length ? prisma.merchant.findMany({ where: { id: { in: merchantIds } }, select: { id: true, name: true, slug: true } }) : [],
+  ]);
+
+  const productNames = new Map(productRows.map((r: { id: number; name: string }) => [r.id, r.name]));
+  const merchantNames = new Map(merchantRows.map((r: { id: string; name: string; slug: string }) => [r.id, { name: r.name, slug: r.slug }]));
+
+  type Order = (typeof orders)[number];
+  const enriched = orders.map((order: Order) => ({
     checkoutId: order.checkoutId,
     orderNumber: order.orderNumber,
     productId: order.productId,

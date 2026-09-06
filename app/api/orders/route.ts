@@ -1,7 +1,6 @@
-import { listCheckouts, updateCheckoutStatus } from "../../../lib/audit-store";
+import { listCheckouts, updateCheckoutStatus, saveAudit } from "../../../lib/audit-store";
 import { listProducts } from "../../../lib/product-store";
 import { can, getActor } from "../../../lib/authz";
-import { saveAudit } from "../../../lib/audit-store";
 import { sendTransactionalEmail } from "../../../lib/email";
 
 const ORDER_STATUSES = ["ready", "created", "paid", "packed", "shipped", "delivered", "cancellation_requested", "cancelled"];
@@ -17,9 +16,10 @@ export async function GET(request: Request) {
   const actor = await getActor(request);
   if (!actor?.merchantId || !can(actor, "orders:read")) return Response.json({ error: "Order-read permission is required." }, { status: actor ? 403 : 401 });
   const [orders, products] = await Promise.all([listCheckouts(50, actor.merchantId), listProducts(actor.merchantId)]);
-  const names = new Map(products.map((product) => [product.id, product.name]));
+  const names = new Map(products.map((p) => [p.id, p.name]));
+  type OrderRow = (typeof orders)[number];
   return Response.json({
-    orders: orders.map((order) => ({
+    orders: orders.map((order: OrderRow) => ({
       ...order,
       productName: names.get(order.productId) ?? `Product #${order.productId}`,
     })),

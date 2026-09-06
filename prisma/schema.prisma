@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Merchant {
+  id        String   @id
+  name      String
+  slug      String   @unique
+  status    String   @default("active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  memberships Membership[]
+  products    Product[]
+
+  @@map("merchants")
+}
+
+model User {
+  id           String   @id
+  email        String   @unique
+  name         String?
+  platformRole String   @default("user") @map("platform_role")
+  status       String   @default("active")
+  passwordHash String?  @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at")
+
+  @@map("users")
+}
+
+model Membership {
+  id         String   @id
+  merchantId String   @map("merchant_id")
+  userId     String?  @map("user_id")
+  email      String
+  role       String
+  status     String   @default("invited")
+  invitedBy  String?  @map("invited_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  merchant Merchant @relation(fields: [merchantId], references: [id])
+
+  @@unique([merchantId, email], map: "membership_merchant_email_idx")
+  @@index([userId], map: "membership_user_idx")
+  @@map("memberships")
+}
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  merchantId  String   @default("merchant_nova") @map("merchant_id")
+  name        String
+  category    String
+  price       Int
+  rating      Float    @default(4.5)
+  inventory   Int      @default(0)
+  description String
+  tags        String   @default("[]")
+  accent      String   @default("lime")
+  imageUrl    String?  @map("image_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  merchant Merchant @relation(fields: [merchantId], references: [id])
+
+  @@index([merchantId], map: "product_merchant_idx")
+  @@map("products")
+}
+
+model ShoppingSession {
+  id            String   @id
+  merchantId    String   @map("merchant_id")
+  customerEmail String?  @map("customer_email")
+  query         String
+  intentJson    String   @map("intent_json")
+  engine        String
+  status        String   @default("active")
+  matchQuality  String?  @map("match_quality")
+  topProductId  Int?     @map("top_product_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([merchantId], map: "shopping_session_merchant_idx")
+  @@map("shopping_sessions")
+}
+
+model AuditEvent {
+  id         Int      @id @default(autoincrement())
+  eventId    String   @unique @map("event_id")
+  merchantId String   @default("merchant_nova") @map("merchant_id")
+  sessionId  String   @map("session_id")
+  eventType  String   @map("event_type")
+  detail     String
+  engine     String   @default("system")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([merchantId], map: "audit_merchant_idx")
+  @@map("audit_events")
+}
+
+model CheckoutEvent {
+  id                Int      @id @default(autoincrement())
+  checkoutId        String   @unique @map("checkout_id")
+  merchantId        String   @default("merchant_nova") @map("merchant_id")
+  customerId        String?  @map("customer_id")
+  customerEmail     String?  @map("customer_email")
+  orderNumber       String?  @map("order_number")
+  sessionId         String   @map("session_id")
+  productId         Int      @map("product_id")
+  amountPaise       Int      @map("amount_paise")
+  provider          String
+  providerReference String?  @map("provider_reference")
+  status            String
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([merchantId], map: "checkout_merchant_idx")
+  @@index([customerId], map: "checkout_customer_idx")
+  @@map("checkout_events")
+}
+
+model Customer {
+  id           String   @id
+  email        String   @unique
+  name         String?
+  passwordHash String?  @map("password_hash")
+  status       String   @default("active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at")
+
+  @@map("customers")
+}
+
+model CustomerOtp {
+  id        Int      @id @default(autoincrement())
+  email     String
+  codeHash  String   @map("code_hash")
+  expiresAt DateTime @map("expires_at")
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([email], map: "customer_otp_email_idx")
+  @@map("customer_otps")
+}
+
+model MerchantPasswordReset {
+  id        Int      @id @default(autoincrement())
+  email     String
+  codeHash  String   @map("code_hash")
+  expiresAt DateTime @map("expires_at")
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([email], map: "merchant_password_reset_email_idx")
+  @@map("merchant_password_resets")
+}

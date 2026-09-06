@@ -4,6 +4,8 @@ import { getRuntimeValue } from "../../../lib/runtime-env";
 import { getActor, resolveMerchantBySlug } from "../../../lib/authz";
 import { resolveCustomer } from "../../../lib/customer-auth";
 
+type CartItem = { productId: number; quantity: number };
+
 type RazorpayPaymentLink = {
   id?: string;
   short_url?: string;
@@ -14,7 +16,10 @@ type RazorpayPaymentLink = {
 export async function POST(request: Request) {
   let payload: {
     sessionId?: string;
+    // Single product (legacy)
     productId?: number;
+    // Cart mode
+    cart?: CartItem[];
     confirmed?: boolean;
     storeSlug?: string;
     customerEmail?: string;
@@ -27,15 +32,23 @@ export async function POST(request: Request) {
   }
 
   const sessionId = payload.sessionId?.trim() ?? "";
-  const productId = Number(payload.productId);
-  if (!sessionId || !Number.isInteger(productId)) {
-    return Response.json({ error: "A valid session and product are required." }, { status: 400 });
-  }
+  if (!sessionId) return Response.json({ error: "A valid session is required." }, { status: 400 });
   if (payload.confirmed !== true) {
-    return Response.json(
-      { error: "Customer confirmation is required before checkout." },
-      { status: 409 },
-    );
+    return Response.json({ error: "Customer confirmation is required before checkout." }, { status: 409 });
+  }
+
+  // Normalise to cart array
+  const cartItems: CartItem[] = payload.cart?.length
+    ? payload.cart
+    : payload.productId
+      ? [{ productId: Number(payload.productId), quantity: 1 }]
+      : [];
+
+  if (!cartItems.length) return Response.json({ error: "Cart is empty." }, { status: 400 });
+  for (const item of cartItems) {
+    if (!Number.isInteger(item.productId) || item.quantity < 1) {
+      return Response.json({ error: "Each cart item needs a valid productId and quantity ≥ 1." }, { status: 400 });
+    }
   }
 
   const actor = payload.storeSlug ? null : await getActor(request);
@@ -46,24 +59,39 @@ export async function POST(request: Request) {
       : null;
   if (!merchant) return Response.json({ error: "A valid store is required." }, { status: 404 });
 
-  const product = await getStoredProduct(productId, merchant.id);
-  if (!product || product.inventory < 1) {
-    return Response.json({ error: "The selected product is unavailable." }, { status: 404 });
+  // Validate all products
+  const resolvedItems = await Promise.all(
+    cartItems.map(async (item) => {
+      const product = await getStoredProduct(item.productId, merchant.id);
+      return { item, product };
+    }),
+  );
+
+  for (const { item, product } of resolvedItems) {
+    if (!product) return Response.json({ error: `Product ${item.productId} not found.` }, { status: 404 });
+    if (product.inventory < item.quantity) {
+      return Response.json({ error: `Only ${product.inventory} units of "${product.name}" available.` }, { status: 409 });
+    }
   }
 
-  // Guest checkout stays supported; a signed-in customer just gets the
-  // order attached to their account so it shows up in order history.
   const customer = await resolveCustomer(request);
   const customerId = customer?.id;
   const customerEmail = customer?.email ?? payload.customerEmail;
 
-  const checkoutId = crypto.randomUUID();
   const orderNumber = `LSA-${Date.now().toString(36).toUpperCase()}`;
-  const amountPaise = product.price * 100;
+  const totalAmountPaise = resolvedItems.reduce(
+    (sum, { item, product }) => sum + product!.price * item.quantity * 100,
+    0,
+  );
+
   const keyId = getRuntimeValue("RAZORPAY_KEY_ID");
   const keySecret = getRuntimeValue("RAZORPAY_KEY_SECRET");
 
-  if (!keyId || !keySecret) {
+  // Save one checkout record per cart item
+  const checkoutIds: string[] = [];
+  for (const { item, product } of resolvedItems) {
+    const checkoutId = crypto.randomUUID();
+    checkoutIds.push(checkoutId);
     await saveCheckout({
       checkoutId,
       merchantId: merchant.id,
@@ -71,30 +99,36 @@ export async function POST(request: Request) {
       customerEmail,
       orderNumber,
       sessionId,
-      productId,
-      amountPaise,
-      provider: "simulation",
+      productId: item.productId,
+      amountPaise: product!.price * item.quantity * 100,
+      provider: keyId && keySecret ? "razorpay" : "simulation",
       status: "ready",
     });
+  }
+
+  if (!keyId || !keySecret) {
     await saveAudit({
       merchantId: merchant.id,
       sessionId,
       eventType: "checkout.simulated",
-      detail: `Confirmation accepted for ${product.name}; no Razorpay keys configured`,
+      detail: `Confirmation accepted for ${resolvedItems.length} item(s); no Razorpay keys configured`,
       engine: "system",
     });
     return Response.json({
-      checkoutId,
+      checkoutId: checkoutIds[0],
       orderNumber,
       mode: "simulation",
       status: "ready",
       checkoutUrl: null,
-      message:
-        "Safe simulation completed. Add Razorpay test keys to create a real test Payment Link.",
+      message: "Safe simulation completed. Add Razorpay test keys to create a real test Payment Link.",
     });
   }
 
-  const referenceId = `lsa_${Date.now()}_${productId}`.slice(0, 40);
+  const referenceId = `lsa_${Date.now()}`.slice(0, 40);
+  const description = resolvedItems.length === 1
+    ? `LocalShop AI order: ${resolvedItems[0].product!.name}`
+    : `LocalShop AI order: ${resolvedItems.length} items`;
+
   const response = await fetch("https://api.razorpay.com/v1/payment_links/", {
     method: "POST",
     headers: {
@@ -102,17 +136,13 @@ export async function POST(request: Request) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      amount: amountPaise,
+      amount: totalAmountPaise,
       currency: "INR",
       accept_partial: false,
       reference_id: referenceId,
-      description: `LocalShop AI order: ${product.name}`,
+      description,
       reminder_enable: false,
-      notes: {
-        merchant_id: merchant.id,
-        localshop_session: sessionId,
-        product_id: String(product.id),
-      },
+      notes: { merchant_id: merchant.id, localshop_session: sessionId },
     }),
   });
 
@@ -122,42 +152,25 @@ export async function POST(request: Request) {
       merchantId: merchant.id,
       sessionId,
       eventType: "checkout.failed",
-      detail:
-        paymentLink.error?.description ?? `Razorpay returned ${response.status}`,
+      detail: paymentLink.error?.description ?? `Razorpay returned ${response.status}`,
       engine: "razorpay",
     });
     return Response.json(
-      {
-        error:
-          "Razorpay test checkout could not be created. Verify the test keys and account configuration.",
-      },
+      { error: "Razorpay test checkout could not be created. Verify the test keys and account configuration." },
       { status: 502 },
     );
   }
 
-  await saveCheckout({
-    checkoutId,
-    merchantId: merchant.id,
-    customerId,
-    customerEmail,
-    orderNumber,
-    sessionId,
-    productId,
-    amountPaise,
-    provider: "razorpay",
-    providerReference: paymentLink.id,
-    status: paymentLink.status ?? "created",
-  });
   await saveAudit({
     merchantId: merchant.id,
     sessionId,
     eventType: "checkout.created",
-    detail: `Razorpay test Payment Link ${paymentLink.id} created after confirmation`,
+    detail: `Razorpay test Payment Link ${paymentLink.id} created for ${resolvedItems.length} item(s)`,
     engine: "razorpay",
   });
 
   return Response.json({
-    checkoutId,
+    checkoutId: checkoutIds[0],
     orderNumber,
     mode: "razorpay-test",
     status: paymentLink.status ?? "created",

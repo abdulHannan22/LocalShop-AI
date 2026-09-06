@@ -28,94 +28,26 @@ export type RankedProduct = CatalogProduct & {
 export type MatchQuality = "strong" | "weak" | "none";
 
 export const catalog: CatalogProduct[] = [
-  {
-    id: 1,
-    name: "NovaSound Flex",
-    category: "Wireless headphones",
-    price: 1799,
-    rating: 4.7,
-    inventory: 18,
-    description: "Clear mic, 38-hour battery and a comfortable over-ear fit.",
-    tags: ["headphones", "online classes", "wireless", "microphone", "study", "comfort"],
-    accent: "lime",
-  },
-  {
-    id: 2,
-    name: "ClearCall Lite",
-    category: "Wireless headset",
-    price: 1299,
-    rating: 4.5,
-    inventory: 27,
-    description: "Lightweight headset with a focused boom microphone.",
-    tags: ["headphones", "online classes", "wireless", "microphone", "calls", "lightweight"],
-    accent: "blue",
-  },
-  {
-    id: 3,
-    name: "StudioMax Air",
-    category: "Premium headphones",
-    price: 2299,
-    rating: 4.8,
-    inventory: 8,
-    description: "Rich sound, hybrid noise control and all-day cushioning.",
-    tags: ["headphones", "music", "wireless", "premium", "noise control", "comfort"],
-    accent: "orange",
-  },
-  {
-    id: 4,
-    name: "CarryShell Mini",
-    category: "Protective case",
-    price: 299,
-    rating: 4.6,
-    inventory: 35,
-    description: "Water-resistant hard shell for compact headphones.",
-    tags: ["case", "accessory", "travel", "gift"],
-    accent: "violet",
-  },
-  {
-    id: 5,
-    name: "PocketBeat Go",
-    category: "Wireless earbuds",
-    price: 1499,
-    rating: 4.4,
-    inventory: 21,
-    description: "Compact earbuds with low-latency audio and a pocket-sized case.",
-    tags: ["earbuds", "wireless", "travel", "gaming", "gift", "compact"],
-    accent: "violet",
-  },
-  {
-    id: 6,
-    name: "StudyBeam Mini",
-    category: "Desk lamp",
-    price: 999,
-    rating: 4.6,
-    inventory: 14,
-    description: "Eye-comfort LED desk lamp with brightness and colour controls.",
-    tags: ["study", "lamp", "desk", "gift", "comfort"],
-    accent: "orange",
-  },
-  {
-    id: 7,
-    name: "ClickPro Silent",
-    category: "Wireless mouse",
-    price: 799,
-    rating: 4.5,
-    inventory: 31,
-    description: "Quiet wireless mouse designed for study desks and shared spaces.",
-    tags: ["mouse", "wireless", "study", "gift", "quiet"],
-    accent: "blue",
-  },
-  {
-    id: 8,
-    name: "ChargeNest 20W",
-    category: "Fast charger",
-    price: 699,
-    rating: 4.7,
-    inventory: 42,
-    description: "Compact USB-C fast charger with temperature protection.",
-    tags: ["charger", "travel", "gift", "compact", "accessory"],
-    accent: "lime",
-  },
+  { id: 1, name: "NovaSound Flex", category: "Wireless headphones", price: 1799, rating: 4.7, inventory: 18, description: "Clear mic, 38-hour battery and a comfortable over-ear fit.", tags: ["headphones", "online classes", "wireless", "microphone", "study", "comfort"], accent: "lime" },
+  { id: 2, name: "ClearCall Lite", category: "Wireless headset", price: 1299, rating: 4.5, inventory: 27, description: "Lightweight headset with a focused boom microphone.", tags: ["headphones", "online classes", "wireless", "microphone", "calls", "lightweight"], accent: "blue" },
+  { id: 3, name: "StudioMax Air", category: "Premium headphones", price: 2299, rating: 4.8, inventory: 8, description: "Rich sound, hybrid noise control and all-day cushioning.", tags: ["headphones", "music", "wireless", "premium", "noise control", "comfort"], accent: "orange" },
+  { id: 4, name: "CarryShell Mini", category: "Protective case", price: 299, rating: 4.6, inventory: 35, description: "Water-resistant hard shell for compact headphones.", tags: ["case", "accessory", "travel", "gift"], accent: "violet" },
+  { id: 5, name: "PocketBeat Go", category: "Wireless earbuds", price: 1499, rating: 4.4, inventory: 21, description: "Compact earbuds with low-latency audio and a pocket-sized case.", tags: ["earbuds", "wireless", "travel", "gaming", "gift", "compact"], accent: "violet" },
+  { id: 6, name: "StudyBeam Mini", category: "Desk lamp", price: 999, rating: 4.6, inventory: 14, description: "Eye-comfort LED desk lamp with brightness and colour controls.", tags: ["study", "lamp", "desk", "gift", "comfort"], accent: "orange" },
+  { id: 7, name: "ClickPro Silent", category: "Wireless mouse", price: 799, rating: 4.5, inventory: 31, description: "Quiet wireless mouse designed for study desks and shared spaces.", tags: ["mouse", "wireless", "study", "gift", "quiet"], accent: "blue" },
+  { id: 8, name: "ChargeNest 20W", category: "Fast charger", price: 699, rating: 4.7, inventory: 42, description: "Compact USB-C fast charger with temperature protection.", tags: ["charger", "travel", "gift", "compact", "accessory"], accent: "lime" },
+  { id: 9, name: "KeyFlow TKL", category: "Mechanical keyboard", price: 2499, rating: 4.6, inventory: 12, description: "Tenkeyless mechanical keyboard with tactile switches and RGB backlight.", tags: ["keyboard", "mechanical", "study", "gaming", "wireless"], accent: "lime" },
+  { id: 10, name: "ViewStand Pro", category: "Laptop stand", price: 1199, rating: 4.5, inventory: 20, description: "Adjustable aluminium laptop stand for ergonomic desk setups.", tags: ["laptop", "stand", "study", "desk", "ergonomic", "comfort"], accent: "blue" },
+  { id: 11, name: "HubLink 7-in-1", category: "USB hub", price: 1599, rating: 4.4, inventory: 16, description: "7-port USB-C hub with HDMI, SD card and 100W pass-through charging.", tags: ["hub", "usb", "laptop", "accessory", "travel", "compact"], accent: "violet" },
+  { id: 12, name: "CoolPad Slim", category: "Laptop cooling pad", price: 899, rating: 4.3, inventory: 25, description: "Ultra-slim dual-fan cooling pad for 15-inch laptops.", tags: ["cooling", "laptop", "study", "gaming", "desk"], accent: "orange" },
+  { id: 13, name: "SnapCam 1080", category: "Webcam", price: 1899, rating: 4.5, inventory: 10, description: "1080p webcam with auto-focus and built-in noise-cancelling mic.", tags: ["webcam", "online classes", "calls", "microphone", "study"], accent: "lime" },
+  { id: 14, name: "DeskMate Organiser", category: "Desk organiser", price: 549, rating: 4.4, inventory: 30, description: "Bamboo desk organiser with phone slot, pen holder and cable tray.", tags: ["desk", "organiser", "study", "gift", "comfort"], accent: "orange" },
+  { id: 15, name: "PowerBank 20K", category: "Power bank", price: 1299, rating: 4.6, inventory: 22, description: "20,000 mAh power bank with dual USB-A and USB-C fast charging.", tags: ["power bank", "travel", "charger", "compact", "gift"], accent: "blue" },
+  { id: 16, name: "SoundBar Mini", category: "Bluetooth speaker", price: 1799, rating: 4.5, inventory: 15, description: "Compact Bluetooth 5.3 speaker with 12-hour battery and IPX5 rating.", tags: ["speaker", "bluetooth", "music", "travel", "gift", "wireless"], accent: "violet" },
+  { id: 17, name: "ErgoGrip Pad", category: "Mouse pad", price: 399, rating: 4.3, inventory: 40, description: "Extended XXL mouse pad with non-slip base and stitched edges.", tags: ["mouse pad", "desk", "study", "gaming", "comfort"], accent: "lime" },
+  { id: 18, name: "NeckEase Pillow", category: "Neck pillow", price: 699, rating: 4.4, inventory: 18, description: "Memory foam travel neck pillow with washable cover.", tags: ["pillow", "travel", "comfort", "gift"], accent: "orange" },
+  { id: 19, name: "CableClip Set", category: "Cable management", price: 199, rating: 4.2, inventory: 60, description: "Set of 20 reusable silicone cable clips for desk and travel.", tags: ["cable", "accessory", "desk", "travel", "gift", "compact"], accent: "blue" },
+  { id: 20, name: "ScreenShield 15", category: "Screen protector", price: 349, rating: 4.3, inventory: 28, description: "Anti-glare tempered glass screen protector for 15-inch laptops.", tags: ["screen", "laptop", "accessory", "study", "gift"], accent: "violet" },
 ];
 
 const knownFeatures = [
@@ -279,26 +211,22 @@ export function rankProducts(
   const categoryTokens = intent.category.toLowerCase().split(/\s+/);
   const useCase = intent.useCase.toLowerCase();
 
-  return source
+  const scored = source
     .filter((product) => product.inventory > 0)
     .map((product) => {
-      // Include the product name itself, not just category/tags — a query
-      // for "moong dal" should match a product literally named "Moong Dal
-      // 1kg" even if its category/tags use a different word (e.g. "Pulses").
       const haystack = `${product.name} ${product.category} ${product.tags.join(" ")}`.toLowerCase();
       const reasons: string[] = [];
       let score = product.rating * 6;
+      let hasSignal = false;
 
       if (intent.budget && product.price <= intent.budget) {
         score += 34;
         reasons.push("Within budget");
+        hasSignal = true;
       } else if (intent.budget && product.price > intent.budget) {
         score -= Math.min(30, ((product.price - intent.budget) / intent.budget) * 50);
       }
 
-      // Whole-phrase match first (handles multi-word categories exactly),
-      // then fall back to individual tokens of at least 3 characters so
-      // short-but-meaningful words like "dal", "oil", "tea" aren't dropped.
       const categoryPhrase = intent.category.toLowerCase().trim();
       const categoryMatched =
         (categoryPhrase.length > 2 && haystack.includes(categoryPhrase)) ||
@@ -306,11 +234,13 @@ export function rankProducts(
       if (categoryMatched) {
         score += 24;
         reasons.push("Category match");
+        hasSignal = true;
       }
 
       if (useCase !== "general use" && haystack.includes(useCase)) {
         score += 18;
         reasons.push(`Good for ${intent.useCase}`);
+        hasSignal = true;
       }
 
       const featureMatches = intent.features.filter((feature) =>
@@ -319,18 +249,18 @@ export function rankProducts(
       score += featureMatches.length * 12;
       if (featureMatches.length) {
         reasons.push(featureMatches.slice(0, 2).join(" + "));
+        hasSignal = true;
       }
 
-      if (!reasons.length) reasons.push("Strong rating", "Available now");
-
-      return {
-        ...product,
-        score: Math.max(0, Math.round(score)),
-        reasons,
-      };
+      return { ...product, score: Math.max(0, Math.round(score)), reasons, hasSignal };
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
+    .sort((a, b) => b.score - a.score);
+
+  // Return only products with real signal (category/use-case/feature/budget match).
+  // If nothing matches at all, return top 3 by rating as a fallback browse.
+  const relevant = scored.filter((p) => p.hasSignal).slice(0, 6);
+  const results = relevant.length ? relevant : scored.slice(0, 3).map((p) => ({ ...p, reasons: ["Strong rating", "Available now"] }));
+  return results.map(({ hasSignal: _hs, ...p }) => p);
 }
 
 export function getProduct(productId: number) {

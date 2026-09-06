@@ -1,12 +1,17 @@
-import { and, asc, eq, sql } from "drizzle-orm";
-import { getDb } from "../db";
-import { memberships, merchants, users } from "../db/schema";
+import { prisma } from "./prisma";
 import { getRuntimeValue } from "./runtime-env";
-import { ensureRuntimeSchema } from "./db-init";
 import { resolveMerchantSessionIdentity } from "./merchant-auth";
 
 export const DEMO_MERCHANT_ID = "merchant_nova";
-export const DEMO_STORE_SLUG = "nova-store";
+export const DEMO_STORE_SLUG = "nova-clothing";
+
+export const DEMO_MERCHANTS = [
+  { id: "merchant_nova",    name: "Nova Clothing",      slug: "nova-clothing" },
+  { id: "merchant_spark",   name: "Spark Accessories",  slug: "spark-accessories" },
+  { id: "merchant_zenith",  name: "Zenith Books",       slug: "zenith-books" },
+  { id: "merchant_pixel",   name: "Pixel Home Decor",   slug: "pixel-home-decor" },
+  { id: "merchant_orbit",   name: "Orbit Sports",       slug: "orbit-sports" },
+] as const;
 
 export type MerchantRole = "owner" | "admin" | "manager" | "sales_agent";
 export type Permission =
@@ -31,33 +36,18 @@ export type Actor = {
 };
 
 const rolePermissions: Record<MerchantRole, Permission[]> = {
-  owner: ["catalogue:write", "inventory:write", "orders:read", "orders:write", "insights:read", "audit:read", "staff:manage"],
-  admin: ["catalogue:write", "inventory:write", "orders:read", "orders:write", "insights:read", "audit:read", "staff:manage"],
-  manager: ["inventory:write", "orders:read", "orders:write", "insights:read", "audit:read"],
+  owner:       ["catalogue:write", "inventory:write", "orders:read", "orders:write", "insights:read", "audit:read", "staff:manage"],
+  admin:       ["catalogue:write", "inventory:write", "orders:read", "orders:write", "insights:read", "audit:read", "staff:manage"],
+  manager:     ["inventory:write", "orders:read", "orders:write", "insights:read", "audit:read"],
   sales_agent: ["orders:read"],
 };
 
-type FallbackMembership = {
-  id: string;
-  merchantId: string;
-  userId: string | null;
-  email: string;
-  role: MerchantRole;
-  status: string;
-  invitedBy: string | null;
-  createdAt: string;
-};
-
-const fallbackUsers = new Map<string, { id: string; email: string; name: string; platformRole: "platform_admin" | "user"; status: string }>();
-let fallbackMemberships: FallbackMembership[] = [];
-let fallbackMerchants = [
-  { id: DEMO_MERCHANT_ID, name: "Nova Store", slug: DEMO_STORE_SLUG, status: "active", createdAt: "", updatedAt: "" },
-];
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
+}
 
 async function identityFromRequest(request: Request) {
-  // Self-serve merchant signup/login (cookie-based) takes priority when
-  // present, so a person who signed up directly doesn't need the hosted
-  // platform's trusted-header identity to use their own account.
   const sessionIdentity = await resolveMerchantSessionIdentity(request);
   if (sessionIdentity) return sessionIdentity;
 
@@ -76,80 +66,54 @@ async function identityFromRequest(request: Request) {
 }
 
 function configuredAdmin(email: string) {
-  const values = (getRuntimeValue("PLATFORM_ADMIN_EMAILS") ?? "")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  return values.includes(email);
+  return (getRuntimeValue("PLATFORM_ADMIN_EMAILS") ?? "")
+    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
+    .includes(email);
 }
 
 async function ensureDemoMerchant() {
-  await ensureRuntimeSchema();
-  const db = getDb();
-  await db.insert(merchants).values({ id: DEMO_MERCHANT_ID, name: "Nova Store", slug: DEMO_STORE_SLUG }).onConflictDoNothing();
+  await Promise.all(
+    DEMO_MERCHANTS.map((m) =>
+      prisma.merchant.upsert({ where: { id: m.id }, update: { name: m.name, slug: m.slug }, create: m }),
+    ),
+  );
 }
 
 export async function resolveMerchantBySlug(slug: string) {
-  try {
-    await ensureDemoMerchant();
-    const [merchant] = await getDb().select().from(merchants).where(and(eq(merchants.slug, slug), eq(merchants.status, "active"))).limit(1);
-    return merchant ?? null;
-  } catch {
-    return fallbackMerchants.find((merchant) => merchant.slug === slug && merchant.status === "active") ?? null;
-  }
+  await ensureDemoMerchant();
+  return prisma.merchant.findFirst({ where: { slug, status: "active" } });
 }
 
 export async function getActor(request: Request): Promise<Actor | null> {
   const identity = await identityFromRequest(request);
   if (!identity) return null;
   const userId = `usr_${await sha256(identity.email)}`;
-  try {
-    await ensureDemoMerchant();
-    const db = getDb();
-    const [membershipCount] = await db.select({ count: sql<number>`count(*)` }).from(memberships);
-    const firstUser = Number(membershipCount?.count ?? 0) === 0;
-    const platformRole = configuredAdmin(identity.email) || firstUser ? "platform_admin" : "user";
-    await db.insert(users).values({ id: userId, email: identity.email, name: identity.name, platformRole }).onConflictDoUpdate({
-      target: users.email,
-      set: { name: identity.name, lastSeenAt: new Date().toISOString(), ...(configuredAdmin(identity.email) ? { platformRole: "platform_admin" } : {}) },
-    });
-    // Membership comes only from an explicit signup or staff invite now —
-    // no auto-provisioning as owner of the demo merchant.
-    const [membership] = await db.select().from(memberships).where(eq(memberships.email, identity.email)).limit(1);
-    const [user] = await db.select().from(users).where(eq(users.email, identity.email)).limit(1);
-    const [merchant] = membership
-      ? await db.select().from(merchants).where(eq(merchants.id, membership.merchantId)).limit(1)
-      : [undefined];
-    return {
-      userId,
-      email: identity.email,
-      name: identity.name,
-      platformRole: user?.platformRole === "platform_admin" ? "platform_admin" : "user",
-      merchantId: membership?.merchantId ?? null,
-      merchantName: merchant?.name ?? null,
-      merchantSlug: merchant?.slug ?? null,
-      role: (membership?.role as MerchantRole | undefined) ?? null,
-    };
-  } catch {
-    let user = fallbackUsers.get(identity.email);
-    const firstUser = fallbackMemberships.length === 0;
-    if (!user) {
-      user = { id: userId, email: identity.email, name: identity.name, platformRole: configuredAdmin(identity.email) || firstUser ? "platform_admin" : "user", status: "active" };
-      fallbackUsers.set(identity.email, user);
-    }
-    const membership = fallbackMemberships.find((item) => item.email === identity.email);
-    const merchant = membership ? fallbackMerchants.find((item) => item.id === membership.merchantId) : undefined;
-    return {
-      userId,
-      email: identity.email,
-      name: identity.name,
-      platformRole: user.platformRole,
-      merchantId: membership?.merchantId ?? null,
-      merchantName: merchant?.name ?? null,
-      merchantSlug: merchant?.slug ?? null,
-      role: (membership?.role as MerchantRole | undefined) ?? null,
-    };
-  }
+
+  await ensureDemoMerchant();
+  const memberCount = await prisma.membership.count();
+  const firstUser = memberCount === 0;
+  const platformRole = configuredAdmin(identity.email) || firstUser ? "platform_admin" : "user";
+
+  await prisma.user.upsert({
+    where: { email: identity.email },
+    update: { name: identity.name, lastSeenAt: new Date(), ...(configuredAdmin(identity.email) ? { platformRole: "platform_admin" } : {}) },
+    create: { id: userId, email: identity.email, name: identity.name, platformRole },
+  });
+
+  const membership = await prisma.membership.findFirst({ where: { email: identity.email } });
+  const user = await prisma.user.findUnique({ where: { email: identity.email } });
+  const merchant = membership ? await prisma.merchant.findUnique({ where: { id: membership.merchantId } }) : null;
+
+  return {
+    userId,
+    email: identity.email,
+    name: identity.name,
+    platformRole: user?.platformRole === "platform_admin" ? "platform_admin" : "user",
+    merchantId: membership?.merchantId ?? null,
+    merchantName: merchant?.name ?? null,
+    merchantSlug: merchant?.slug ?? null,
+    role: (membership?.role as MerchantRole | undefined) ?? null,
+  };
 }
 
 export function can(actor: Actor | null, permission: Permission) {
@@ -160,36 +124,17 @@ export function can(actor: Actor | null, permission: Permission) {
 
 export async function listStaff(actor: Actor) {
   if (!actor.merchantId) return [];
-  try {
-    return await getDb().select().from(memberships).where(eq(memberships.merchantId, actor.merchantId)).orderBy(asc(memberships.createdAt));
-  } catch {
-    return fallbackMemberships.filter((item) => item.merchantId === actor.merchantId);
-  }
+  return prisma.membership.findMany({ where: { merchantId: actor.merchantId }, orderBy: { createdAt: "asc" } });
 }
 
 export async function inviteStaff(actor: Actor, email: string, role: MerchantRole) {
   if (!actor.merchantId) return null;
   const normalized = email.trim().toLowerCase();
-  try {
-    const db = getDb();
-    const id = crypto.randomUUID();
-    await db.insert(memberships).values({ id, merchantId: actor.merchantId, email: normalized, role, status: "invited", invitedBy: actor.userId }).onConflictDoUpdate({
-      target: [memberships.merchantId, memberships.email],
-      set: { role, status: "invited", invitedBy: actor.userId },
-    });
-    const [row] = await db.select().from(memberships).where(and(eq(memberships.merchantId, actor.merchantId), eq(memberships.email, normalized))).limit(1);
-    return row ?? null;
-  } catch {
-    let row = fallbackMemberships.find((item) => item.merchantId === actor.merchantId && item.email === normalized);
-    if (row) {
-      row = { ...row, role, status: "invited", invitedBy: actor.userId };
-      fallbackMemberships = fallbackMemberships.map((item) => item.id === row?.id ? row : item);
-      return row;
-    }
-    row = { id: crypto.randomUUID(), merchantId: actor.merchantId, userId: null, email: normalized, role, status: "invited", invitedBy: actor.userId, createdAt: new Date().toISOString() };
-    fallbackMemberships.push(row);
-    return row;
-  }
+  return prisma.membership.upsert({
+    where: { merchantId_email: { merchantId: actor.merchantId, email: normalized } },
+    update: { role, status: "invited", invitedBy: actor.userId },
+    create: { id: crypto.randomUUID(), merchantId: actor.merchantId, email: normalized, role, status: "invited", invitedBy: actor.userId },
+  });
 }
 
 export async function updateStaffMembership(
@@ -199,85 +144,32 @@ export async function updateStaffMembership(
   status: "active" | "suspended" | "invited",
 ) {
   if (!actor.merchantId) return null;
-  try {
-    const [existing] = await getDb()
-      .select()
-      .from(memberships)
-      .where(and(eq(memberships.id, membershipId), eq(memberships.merchantId, actor.merchantId)))
-      .limit(1);
-    if (!existing || existing.role === "owner") return null;
-    const [row] = await getDb()
-      .update(memberships)
-      .set({ role, status })
-      .where(and(eq(memberships.id, membershipId), eq(memberships.merchantId, actor.merchantId)))
-      .returning();
-    return row ?? null;
-  } catch {
-    const index = fallbackMemberships.findIndex(
-      (item) => item.id === membershipId && item.merchantId === actor.merchantId && item.role !== "owner",
-    );
-    if (index < 0) return null;
-    fallbackMemberships[index] = { ...fallbackMemberships[index], role, status };
-    return fallbackMemberships[index];
-  }
+  const existing = await prisma.membership.findFirst({ where: { id: membershipId, merchantId: actor.merchantId } });
+  if (!existing || existing.role === "owner") return null;
+  return prisma.membership.update({ where: { id: membershipId }, data: { role, status } });
 }
 
 export async function createMerchant(name: string, slug: string, ownerEmail: string) {
   const normalizedSlug = slug.trim().toLowerCase();
   const normalizedEmail = ownerEmail.trim().toLowerCase();
   const id = `merchant_${await sha256(normalizedSlug)}`;
-  try {
-    await ensureRuntimeSchema();
-    const db = getDb();
-    await db.insert(merchants).values({ id, name: name.trim(), slug: normalizedSlug });
-    await db.insert(memberships).values({
-      id: crypto.randomUUID(),
-      merchantId: id,
-      email: normalizedEmail,
-      role: "owner",
-      status: "invited",
-    });
-    const [merchant] = await db.select().from(merchants).where(eq(merchants.id, id)).limit(1);
-    return merchant ?? null;
-  } catch {
-    if (fallbackMerchants.some((merchant) => merchant.slug === normalizedSlug)) return null;
-    const merchant = { id, name: name.trim(), slug: normalizedSlug, status: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    fallbackMerchants.push(merchant);
-    fallbackMemberships.push({ id: crypto.randomUUID(), merchantId: id, userId: null, email: normalizedEmail, role: "owner", status: "invited", invitedBy: null, createdAt: new Date().toISOString() });
-    return merchant;
-  }
+  await prisma.merchant.create({ data: { id, name: name.trim(), slug: normalizedSlug } });
+  await prisma.membership.create({
+    data: { id: crypto.randomUUID(), merchantId: id, email: normalizedEmail, role: "owner", status: "invited" },
+  });
+  return prisma.merchant.findUnique({ where: { id } });
 }
 
 export async function listAllMerchants() {
-  try {
-    await ensureDemoMerchant();
-    const db = getDb();
-    const merchantRows = await db.select().from(merchants).orderBy(asc(merchants.createdAt));
-    return Promise.all(merchantRows.map(async (merchant) => {
-      const [memberCount] = await db.select({ count: sql<number>`count(*)` }).from(memberships).where(eq(memberships.merchantId, merchant.id));
-      return { ...merchant, memberCount: Number(memberCount?.count ?? 0) };
-    }));
-  } catch {
-    return fallbackMerchants.map((merchant) => ({
-      ...merchant,
-      memberCount: fallbackMemberships.filter((membership) => membership.merchantId === merchant.id).length,
-    }));
-  }
+  await ensureDemoMerchant();
+  const merchants = await prisma.merchant.findMany({ orderBy: { createdAt: "asc" } });
+  type MerchantRow = (typeof merchants)[number];
+  return Promise.all(merchants.map(async (m: MerchantRow) => ({
+    ...m,
+    memberCount: await prisma.membership.count({ where: { merchantId: m.id } }),
+  })));
 }
 
 export async function updateMerchantStatus(id: string, status: "active" | "suspended") {
-  try {
-    const [row] = await getDb().update(merchants).set({ status, updatedAt: new Date().toISOString() }).where(eq(merchants.id, id)).returning();
-    return row ?? null;
-  } catch {
-    const index = fallbackMerchants.findIndex((merchant) => merchant.id === id);
-    if (index < 0) return null;
-    fallbackMerchants[index] = { ...fallbackMerchants[index], status, updatedAt: new Date().toISOString() };
-    return fallbackMerchants[index];
-  }
-}
-
-async function sha256(value: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 24);
+  return prisma.merchant.update({ where: { id }, data: { status } });
 }

@@ -31,11 +31,15 @@ yarn-error.log*
 .env*
 !.env.example
 
+# prisma local environment
+/prisma/.env
+
 # vercel
 .vercel
 
 # typescript
 next-env.d.ts
+*.tsbuildinfo
 /dist/
 /.wrangler/
 /.sites-runtime/

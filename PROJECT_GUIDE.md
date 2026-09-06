@@ -21,7 +21,7 @@ sequenceDiagram
   participant Customer
   participant API
   participant AI as Gemini/fallback
-  participant DB as Tenant-scoped D1
+  participant DB as Tenant-scoped Postgres
   participant Pay as Razorpay test
   Customer->>API: Need + store slug
   API->>AI: Extract structured intent
@@ -83,10 +83,8 @@ arbitrary tenant ID.
 | `checkout_events` | Order number, authoritative amount, provider and status |
 | `audit_events` | AI, catalogue, inventory, staff, order and payment evidence |
 
-Drizzle schema lives in `db/schema.ts`; SQL migrations are under `drizzle/`.
-`lib/db-init.ts` safely creates missing tables and indexes at runtime so a fresh
-local D1 works immediately. Versioned migrations remain the preferred
-production change-control mechanism.
+Prisma schema lives in `prisma/schema.prisma`; migrations are under
+`prisma/migrations/`. Run `npm run db:migrate` to apply pending migrations.
 
 ## 5. Application surfaces
 
@@ -151,7 +149,6 @@ production change-control mechanism.
 - Invalid Gemini output or request failure: deterministic fallback.
 - Missing Razorpay test keys: clearly labelled simulation; no real payment.
 - Configured Razorpay failure: visible error; never converted to success.
-- Missing D1 binding: in-memory fallback for demonstration only.
 - Suspended merchant: storefront resolution returns not found.
 
 ## 9. Source structure
@@ -162,15 +159,14 @@ app/
   store/[slug]/ + storefront.tsx  customer storefront
   api/                            server endpoints
   localshop-workspace.tsx         merchant workspace
-db/schema.ts                      Drizzle data model
-drizzle/                          versioned SQL migrations
+prisma/schema.prisma              Prisma data model
+prisma/migrations/                versioned SQL migrations
 lib/authz.ts                      identity, roles and tenant governance
-lib/db-init.ts                    fresh-D1 runtime initialization
 lib/product-store.ts              tenant catalogue repository
 lib/session-store.ts              shopping-session repository
 lib/audit-store.ts                audit/order repository
 lib/gemini.ts                     structured intent extraction
-worker/index.ts                   Worker entry + security headers
+worker/index.ts                   security headers middleware
 tests/                            production-render smoke test
 ```
 

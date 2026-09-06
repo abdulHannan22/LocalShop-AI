@@ -4,9 +4,9 @@
 
 - Node.js 22.13 or newer (Node 22 LTS recommended)
 - npm
+- A Neon Postgres database (free tier works)
 - A current Chrome, Edge or Firefox browser
-- Optional: Gemini API key, Razorpay **test-mode** credentials and Cloudflare
-  account for hosted D1/Workers deployment
+- Optional: Gemini API key, Razorpay **test-mode** credentials
 
 Check versions:
 
@@ -23,33 +23,26 @@ From the extracted project folder:
 cd D:\Projects\LocalShop-AI
 npm install
 Copy-Item .env.example .env
-New-Item -ItemType Directory -Force .openai
-Copy-Item hosting.local.example.json .openai\hosting.json
+# Edit .env and set DATABASE_URL (and optionally DIRECT_DATABASE_URL) to your Neon connection string
+npm run db:migrate
 npm run dev:portable
 ```
 
-The final two setup commands fix the earlier
-`Could not resolve './.openai/hosting.json'` problem and enable a local D1
-binding named `DB`. The Vite configuration is also defensive: it can start when
-the file is absent, but database-backed multi-user behavior requires the local
-binding file.
-
-Open the URL printed by Vite. It is normally `http://localhost:3000`; if that
-port is occupied Vite prints another port.
+Open the URL printed by Vite. It is normally `http://localhost:3000`.
 
 ## macOS/Linux installation
 
 ```bash
 npm install
 cp .env.example .env
-mkdir -p .openai
-cp hosting.local.example.json .openai/hosting.json
+# Edit .env and set DATABASE_URL to your Neon connection string
+npm run db:migrate
 npm run dev:portable
 ```
 
 ## First-use workflow
 
-1. Open `/`. The local identity from `.env` bootstraps Nova Store owner access.
+1. Open `/`. Sign up or log in as the merchant owner.
 2. Open `/store/nova-store` to use the customer experience.
 3. Open `/admin` to create another merchant and invite its owner.
 4. Return to the merchant workspace and use **Staff** to invite a manager,
@@ -57,20 +50,21 @@ npm run dev:portable
 5. To test another identity locally, change `DEV_USER_EMAIL` to the exact
    invited email and restart the development server.
 
-Local D1 state is under the ignored `.wrangler` directory and survives normal
-development-server restarts.
-
 ## Environment configuration
 
-The safe default `.env` works without external services:
+The safe default `.env` works without external services once `DATABASE_URL` is set:
 
 ```env
+DATABASE_URL=postgresql://...
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.7-flash
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 RAZORPAY_WEBHOOK_SECRET=
 PLATFORM_ADMIN_EMAILS=
+CUSTOMER_SESSION_SECRET=
+MERCHANT_SESSION_SECRET=
+DEV_AUTOLOGIN=false
 DEV_USER_EMAIL=owner@nova.local
 DEV_USER_NAME=Nova Store Owner
 ```
@@ -114,31 +108,23 @@ Recommended manual smoke test:
 7. A suspended merchant's store slug no longer resolves.
 8. Audit view shows recommendation and operational changes.
 
-## Deploy to a Workers/D1 environment
+## Deploy to Neon + Node hosting
 
-1. Provision a D1 database and bind it to the Worker as `DB`.
-2. Apply every SQL file under `drizzle/` in numeric order through your release
-   pipeline. Runtime initialization supports a fresh database, but migrations
-   are the production source of truth.
-3. Configure environment secrets in the hosting dashboard—never in Git.
-4. Configure the verified identity boundary used by protected routes.
-5. Run the verification commands above and deploy the Worker build.
+1. Provision a Neon Postgres database and copy the connection string.
+2. Set `DATABASE_URL` (and `DIRECT_DATABASE_URL` for migrations) in your
+   hosting environment secrets.
+3. Run `npm run db:migrate` in your CI/CD pipeline to apply Prisma migrations.
+4. Configure all other environment secrets in the hosting dashboard—never in Git.
+5. Run the verification commands above and deploy.
 6. Configure Razorpay test webhook URL/secret and send a test event.
 7. Add rate limits, WAF/bot rules, logs, alerts, backups and a custom domain.
 
-Account-specific `.openai/hosting.json`, `.env`, `.wrangler`, `node_modules` and
-build output are intentionally excluded from the downloadable ZIP.
-
 ## Troubleshooting
 
-### Missing `.openai/hosting.json`
+### Missing DATABASE_URL
 
-The source now starts without it. For persistent local D1, run:
-
-```powershell
-New-Item -ItemType Directory -Force .openai
-Copy-Item hosting.local.example.json .openai\hosting.json
-```
+Copy `.env.example` to `.env` and set `DATABASE_URL` to your Neon connection
+string, then run `npm run db:migrate` before starting the dev server.
 
 ### Port already in use
 
@@ -147,11 +133,6 @@ Use the alternative URL printed by Vite, or start on a chosen port:
 ```powershell
 npm run dev:portable -- --port 4173
 ```
-
-### Dependency installation looks corrupted
-
-Close the dev server, remove only this project's `node_modules`, then run
-`npm install` again. Do not use `npm audit fix --force` as a general setup step.
 
 ### Razorpay remains in simulation mode
 

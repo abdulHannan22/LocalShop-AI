@@ -25,8 +25,8 @@ orders, staff roles and audit history.
 - Platform-admin merchant onboarding, activation and suspension.
 - Merchant owner, admin, manager and sales-agent roles.
 - Email-based staff invitations, activation and suspension.
-- Durable D1 tables for tenants, identities, memberships, products, sessions,
-  orders and audit events.
+- Durable Postgres tables (Neon) for tenants, identities, memberships, products,
+  sessions, orders and audit events.
 - Gemini structured intent extraction with a deterministic offline fallback.
 - Server-side product ranking; the AI never controls price, stock or payment.
 - Confirmation-gated Razorpay test Payment Links and verified webhooks.
@@ -43,12 +43,12 @@ flowchart LR
   A[Platform admin] --> API
   API --> AUTH[Identity + RBAC + tenant resolver]
   API --> AI[Gemini or deterministic intent]
-  AUTH --> D1[(Cloudflare D1)]
+  AUTH --> DB[(Neon Postgres)]
   AI --> RANK[Trusted catalogue ranking]
-  RANK --> D1
+  RANK --> DB
   API --> RP[Razorpay test Payment Links]
   RP --> WH[Signed webhook]
-  WH --> D1
+  WH --> DB
 ```
 
 Every merchant-owned row carries a `merchant_id`, and backend queries include
@@ -61,36 +61,34 @@ trusted for protected operations.
 |---|---|
 | UI | React 19, TypeScript, responsive CSS |
 | App framework | Vinext/Next-compatible App Router, Vite |
-| Runtime | Cloudflare Workers |
-| Database | Cloudflare D1 (SQLite), Drizzle ORM/migrations |
+| Runtime | Node.js / Vite (vinext) |
+| Database | Neon Postgres, Prisma ORM |
 | AI | Gemini structured output + deterministic fallback |
 | Payments | Razorpay Payment Links in test mode + HMAC webhooks |
 | Identity | Verified hosted identity headers; local development identity |
 
 ## Quick start on Windows PowerShell
 
-Requirements: Node.js 22.13+ and npm.
+Requirements: Node.js 22.13+ and npm, plus a Neon Postgres database.
 
 ```powershell
 cd D:\Projects\LocalShop-AI
 npm install
 Copy-Item .env.example .env
-New-Item -ItemType Directory -Force .openai
-Copy-Item hosting.local.example.json .openai\hosting.json
+# Edit .env and set DATABASE_URL to your Neon connection string
+npm run db:migrate
 npm run dev:portable
 ```
 
-Open the URL printed by Vite (normally `http://localhost:3000`). The local D1
-binding is created from `hosting.local.example.json`, and the application
-creates its tables and demo tenant on first use.
+Open the URL printed by Vite (normally `http://localhost:3000`).
 
 macOS/Linux equivalents:
 
 ```bash
 npm install
 cp .env.example .env
-mkdir -p .openai
-cp hosting.local.example.json .openai/hosting.json
+# Edit .env and set DATABASE_URL to your Neon connection string
+npm run db:migrate
 npm run dev:portable
 ```
 
@@ -102,6 +100,8 @@ platform administrator. Change `DEV_USER_EMAIL` to test an invited staff user.
 The app works without external keys. Add these only in a private `.env` file:
 
 ```env
+DATABASE_URL=postgresql://...
+DIRECT_DATABASE_URL=postgresql://...
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.7-flash
 RAZORPAY_KEY_ID=rzp_test_xxx

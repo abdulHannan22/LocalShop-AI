@@ -10,6 +10,6 @@ export async function GET(request: Request) {
       razorpay: Boolean(getRuntimeValue("RAZORPAY_KEY_ID") && getRuntimeValue("RAZORPAY_KEY_SECRET")),
       webhook: Boolean(getRuntimeValue("RAZORPAY_WEBHOOK_SECRET")),
     },
-    storage: "D1 when bound; safe fallback otherwise",
+    storage: "Prisma Postgres (Neon)",
   });
 }

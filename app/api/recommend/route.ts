@@ -31,16 +31,14 @@ export async function POST(request: Request) {
       : null;
   if (!merchant) return Response.json({ error: "A valid store is required." }, { status: 404 });
 
-  // Cost control: cap real Gemini calls per merchant per UTC day. Once hit,
-  // requests keep working via the deterministic fallback instead of failing
-  // or silently racking up cost — same graceful-degradation shape used for
-  // Razorpay and transactional email elsewhere in the app.
+  // Run intent extraction and catalogue fetch in parallel to cut latency.
   const geminiDailyLimit = Number(getRuntimeValue("GEMINI_DAILY_LIMIT") ?? "200");
-  const geminiCallsToday = await countTodayGeminiCalls(merchant.id);
+  const [geminiCallsToday, catalogue] = await Promise.all([
+    countTodayGeminiCalls(merchant.id),
+    listProducts(merchant.id),
+  ]);
   const rateLimited = geminiCallsToday >= geminiDailyLimit;
-
   const { intent, engine } = await extractShoppingIntent(query, { forceRules: rateLimited });
-  const catalogue = await listProducts(merchant.id);
   const products = rankProducts(intent, catalogue);
   const matchQuality = assessMatchQuality(products);
   const audit = [
