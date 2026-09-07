@@ -11,6 +11,10 @@ The same application includes three experiences:
 - Merchant workspace: `/`
 - Platform administration: `/admin`
 
+The application runs as a Node.js/Vinext service with Neon Postgres. It is
+designed for a managed HTTPS deployment, and the payment integration is
+test-mode-first.
+
 ## What it solves
 
 Small retailers lose sales because customers describe a problem or budget—not
@@ -65,7 +69,7 @@ trusted for protected operations.
 | Database | Neon Postgres, Prisma ORM |
 | AI | Gemini structured output + deterministic fallback |
 | Payments | Razorpay Payment Links in test mode + HMAC webhooks |
-| Identity | Verified hosted identity headers; local development identity |
+| Identity | Merchant/customer sessions; optional verified hosted identity headers |
 
 ## Quick start on Windows PowerShell
 
@@ -92,8 +96,9 @@ npm run db:migrate
 npm run dev:portable
 ```
 
-The local identity in `.env.example` becomes the initial Nova Store owner and
-platform administrator. Change `DEV_USER_EMAIL` to test an invited staff user.
+Create a merchant owner account from `/`. Customers use the storefront's
+password or OTP flow. `DEV_*` values are local-only compatibility settings;
+never enable `DEV_AUTOLOGIN` in production.
 
 ## Optional integrations
 
@@ -108,9 +113,25 @@ RAZORPAY_KEY_ID=rzp_test_xxx
 RAZORPAY_KEY_SECRET=
 RAZORPAY_WEBHOOK_SECRET=
 PLATFORM_ADMIN_EMAILS=verified-admin@example.com
+CUSTOMER_SESSION_SECRET=long-random-value
+MERCHANT_SESSION_SECRET=another-long-random-value
 ```
 
 Never commit `.env` or live-mode payment credentials.
+
+## Deployment
+
+For a complete runbook, see [INSTALLATION.md](./INSTALLATION.md). The short
+version is: configure Neon and production secrets, run `npm ci`, apply
+`npm run db:migrate`, build with `npm run build:portable`, and start with
+`npm run start`. Configure the Razorpay webhook at
+`https://YOUR_DOMAIN/api/webhooks/razorpay` only when the public HTTPS domain is
+available.
+
+Required production settings are `DATABASE_URL`,
+`CUSTOMER_SESSION_SECRET`, `MERCHANT_SESSION_SECRET`, and
+`PLATFORM_ADMIN_EMAILS`. Add `DIRECT_DATABASE_URL` for a separate migration
+connection, and add Resend, Gemini, or Razorpay settings for those integrations.
 
 ## Verification commands
 

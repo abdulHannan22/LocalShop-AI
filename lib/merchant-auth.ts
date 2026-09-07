@@ -1,15 +1,18 @@
+import { SignJWT, jwtVerify } from "jose";
 import { prisma } from "./prisma";
 import { sendTransactionalEmail } from "./email";
 import { getRuntimeValue } from "./runtime-env";
 
 export const MERCHANT_SESSION_COOKIE = "lsa_merchant_session";
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const PBKDF2_ITERATIONS = 100_000;
 const RESET_TTL_MINUTES = 15;
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
+
+// --- Password hashing: unchanged, still pure Web Crypto, no DB. ---
 
 async function hashPassword(password: string) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -59,6 +62,8 @@ function generateResetCode() {
   return String(100000 + (bytes[0] % 900000));
 }
 
+// --- Password reset: unchanged from before. ---
+
 export async function requestPasswordReset(rawEmail: string) {
   const email = normalizeEmail(rawEmail);
   const user = await prisma.user.findUnique({ where: { email } });
@@ -105,6 +110,10 @@ export async function resetMerchantPassword(rawEmail: string, code: string, newP
   return { ok: true } as const;
 }
 
+// --- Signup: one email = one store, enforced by the DB's unique
+// constraint on Membership.email (a second signup with the same email
+// will fail the transaction with a unique-constraint violation). ---
+
 export async function signUpMerchant(input: { storeName: string; slug: string; ownerName: string; email: string; password: string }) {
   const email = normalizeEmail(input.email);
   const slug = input.slug.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -118,6 +127,10 @@ export async function signUpMerchant(input: { storeName: string; slug: string; o
   const existingUser = await prisma.user.findUnique({ where: { email } });
   if (existingUser?.passwordHash) {
     return { error: "An account with this email already exists. Try signing in instead." } as const;
+  }
+  const existingMembership = await prisma.membership.findUnique({ where: { email } });
+  if (existingMembership) {
+    return { error: "This email is already associated with a store. Each email can only own one store." } as const;
   }
   const existingSlug = await prisma.merchant.findUnique({ where: { slug } });
   if (existingSlug) return { error: "That store URL is already taken." } as const;
@@ -137,44 +150,54 @@ export async function signUpMerchant(input: { storeName: string; slug: string; o
   return { userId, merchantId, slug } as const;
 }
 
+// signInMerchant now also returns merchantId (needed to embed in the JWT).
+// Since one email = one store, this lookup is unambiguous by construction.
 export async function signInMerchant(rawEmail: string, password: string) {
   const email = normalizeEmail(rawEmail);
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user?.passwordHash) return null;
   const valid = await verifyPassword(password, user.passwordHash);
-  return valid ? { userId: user.id, email: user.email, name: user.name ?? email } : null;
+  if (!valid) return null;
+
+  const membership = await prisma.membership.findUnique({ where: { email } });
+  if (!membership) return null; // account exists but isn't attached to a store
+
+  return { userId: user.id, email: user.email, name: user.name ?? email, merchantId: membership.merchantId };
 }
 
-async function hmacKey() {
+// --- Sessions: real JWT (HS256 via `jose`), carrying merchantId directly
+// so getActor() never needs an ambiguous "find membership by email" query
+// for a logged-in session. ---
+
+function sessionSecretKey() {
   const secret = getRuntimeValue("MERCHANT_SESSION_SECRET") ?? "localshop-ai-dev-merchant-session-secret";
-  return crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+  return new TextEncoder().encode(secret);
 }
 
-export async function signMerchantSession(userId: string) {
-  const expires = Date.now() + SESSION_TTL_SECONDS * 1000;
-  const payload = `${userId}.${expires}`;
-  const key = await hmacKey();
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  const signatureHex = Array.from(new Uint8Array(signature)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  return { token: `${payload}.${signatureHex}`, maxAge: SESSION_TTL_SECONDS };
+export type MerchantSessionClaims = { sub: string; email: string; merchantId: string };
+
+export async function signMerchantSession(userId: string, email: string, merchantId: string) {
+  const token = await new SignJWT({ email, merchantId })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
+    .sign(sessionSecretKey());
+  return { token, maxAge: SESSION_TTL_SECONDS };
 }
 
-async function verifyMerchantSessionToken(token: string): Promise<string | null> {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [userId, expiresRaw, signatureHex] = parts;
-  const expires = Number(expiresRaw);
-  if (!userId || !Number.isFinite(expires) || expires < Date.now()) return null;
-
-  const key = await hmacKey();
-  const expectedSig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${userId}.${expiresRaw}`));
-  const expectedHex = Array.from(new Uint8Array(expectedSig)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  if (expectedHex.length !== signatureHex.length) return null;
-  let mismatch = 0;
-  for (let i = 0; i < expectedHex.length; i += 1) {
-    mismatch |= expectedHex.charCodeAt(i) ^ signatureHex.charCodeAt(i);
+async function verifyMerchantSessionToken(token: string): Promise<MerchantSessionClaims | null> {
+  try {
+    const { payload } = await jwtVerify(token, sessionSecretKey());
+    if (typeof payload.sub !== "string" || typeof payload.email !== "string" || typeof payload.merchantId !== "string") {
+      return null;
+    }
+    return { sub: payload.sub, email: payload.email, merchantId: payload.merchantId };
+  } catch {
+    // Covers expired tokens, bad signatures, and malformed tokens alike —
+    // jwtVerify throws for all of these.
+    return null;
   }
-  return mismatch === 0 ? userId : null;
 }
 
 function readCookie(request: Request, name: string) {
@@ -196,12 +219,23 @@ export function clearMerchantSessionCookieHeader() {
   return `${MERCHANT_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 
-export async function resolveMerchantSessionIdentity(request: Request): Promise<{ email: string; name: string } | null> {
+/**
+ * Resolves identity AND merchantId directly from the JWT's verified
+ * claims — no database lookup needed at all for this step, and no
+ * ambiguity possible, since the merchantId was fixed at login time.
+ */
+export async function resolveMerchantSessionIdentity(
+  request: Request,
+): Promise<{ email: string; name: string; merchantId: string } | null> {
   const token = readCookie(request, MERCHANT_SESSION_COOKIE);
   if (!token) return null;
-  const userId = await verifyMerchantSessionToken(token);
-  if (!userId) return null;
+  const claims = await verifyMerchantSessionToken(token);
+  if (!claims) return null;
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  return user ? { email: user.email, name: user.name ?? user.email } : null;
+  // Still fetch the user row for `name` (which can change after login) and
+  // to confirm the account still exists — but merchantId comes from the
+  // token, not a fresh membership query.
+  const user = await prisma.user.findUnique({ where: { id: claims.sub } });
+  if (!user) return null;
+  return { email: claims.email, name: user.name ?? claims.email, merchantId: claims.merchantId };
 }

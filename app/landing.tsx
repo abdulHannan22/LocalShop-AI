@@ -29,6 +29,10 @@ export function Landing() {
   const [showStores, setShowStores] = useState(false);
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("choose")) {
+      setMode("choose");
+      return;
+    }
     fetch("/api/me")
       .then((response) => (response.ok ? "workspace" : "choose"))
       .then((next) => setMode(next as Mode))

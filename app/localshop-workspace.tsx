@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { catalog, type CatalogProduct, type RankedProduct, type ShoppingIntent } from "../lib/catalog";
+import { type CatalogProduct, type RankedProduct, type ShoppingIntent } from "../lib/catalog";
 
 type Tab = "sales" | "catalogue" | "orders" | "insights" | "audit" | "staff";
 
@@ -103,11 +103,6 @@ const initialIntent: ShoppingIntent = {
   language: "en",
 };
 
-const initialProducts: RankedProduct[] = catalog.slice(0, 3).map((product, index) => ({
-  ...product,
-  score: 94 - index * 7,
-  reasons: index === 0 ? ["Within budget", "Clear microphone"] : ["Strong rating", "Available now"],
-}));
 
 const viewCopy: Record<Tab, { eyebrow: string; title: string }> = {
   sales: { eyebrow: "AI sales agent", title: "Turn product questions into confident checkouts." },
@@ -152,18 +147,18 @@ export function LocalShopWorkspace() {
   const [query, setQuery] = useState(prompts[0]);
   const [submittedQuery, setSubmittedQuery] = useState(prompts[0]);
   const [intent, setIntent] = useState<ShoppingIntent>(initialIntent);
-  const [results, setResults] = useState<RankedProduct[]>(initialProducts);
+  const [results, setResults] = useState<RankedProduct[]>([]);
   const [engine, setEngine] = useState<"gemini" | "rules">("rules");
   const [sessionId, setSessionId] = useState("seed-demo-session");
-  const [selectedId, setSelectedId] = useState<number | null>(1);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [checkout, setCheckout] = useState<CheckoutResponse | null>(null);
   const [auditEvents, setAuditEvents] = useState(["intent.extracted", "catalogue.queried", "inventory.verified"]);
-  const [notice, setNotice] = useState("3 products matched your request");
+  const [notice, setNotice] = useState("Loading your store…");
   const [loading, setLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
   const [error, setError] = useState("");
-  const [catalogueProducts, setCatalogueProducts] = useState<CatalogProduct[]>(catalog);
+  const [catalogueProducts, setCatalogueProducts] = useState<CatalogProduct[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
   const [insights, setInsights] = useState<InsightData | null>(null);
@@ -401,7 +396,13 @@ export function LocalShopWorkspace() {
         </section>
         <aside className="recommendation-panel">
           <div className="recommendation-heading"><div><p className="eyebrow">Live catalogue</p><h2>Recommended for this customer</h2></div><span className="match-badge">{results.length} matches</span></div>
-          {loading ? <div className="loading-products" aria-live="polite"><span /><span /><span /></div> : <div className="product-list">{results.map((product, index) => <article className={`product-card ${selectedId === product.id ? "selected" : ""}`} key={product.id}><div className={`product-visual ${product.accent}`}><span>{index === 0 ? "Best match" : `${product.score}% match`}</span><div className="headphone-shape" aria-hidden="true"><i /><b /></div></div><div className="product-copy"><div className="product-title-row"><div><p>{product.category}</p><h3>{product.name}</h3></div><strong>{formatPrice(product.price)}</strong></div><p className="product-description">{product.description}</p><div className="reason-tags">{product.reasons.slice(0, 2).map((reason) => <span key={reason}>{reason}</span>)}</div><div className="product-meta"><span>★ {product.rating}</span><span>{product.inventory} in stock</span></div><button type="button" onClick={() => selectProduct(product)}>{selectedId === product.id ? "Selected" : "Choose this product"}</button></div></article>)}</div>}
+          {loading ? <div className="loading-products" aria-live="polite"><span /><span /><span /></div> : results.length === 0 ? (
+            <div className="empty-state">
+              <strong>No products in your catalogue yet</strong>
+              <p>Add products from the Catalogue tab so the AI agent can recommend them to shoppers.</p>
+              <button type="button" onClick={() => setTab("catalogue")}>Open catalogue</button>
+            </div>
+          ) : <div className="product-list">{results.map((product, index) => <article className={`product-card ${selectedId === product.id ? "selected" : ""}`} key={product.id}><div className={`product-visual ${product.accent}`}><span>{index === 0 ? "Best match" : `${product.score}% match`}</span><div className="headphone-shape" aria-hidden="true"><i /><b /></div></div><div className="product-copy"><div className="product-title-row"><div><p>{product.category}</p><h3>{product.name}</h3></div><strong>{formatPrice(product.price)}</strong></div><p className="product-description">{product.description}</p><div className="reason-tags">{product.reasons.slice(0, 2).map((reason) => <span key={reason}>{reason}</span>)}</div><div className="product-meta"><span>★ {product.rating}</span><span>{product.inventory} in stock</span></div><button type="button" onClick={() => selectProduct(product)}>{selectedId === product.id ? "Selected" : "Choose this product"}</button></div></article>)}</div>}
           <div className="checkout-card"><div><p>Selected order</p><strong>{selectedProduct ? selectedProduct.name : "Choose a product"}</strong>{selectedProduct && <span>{formatPrice(selectedProduct.price)} · Free delivery</span>}</div><button type="button" disabled={!selectedProduct || checkoutLoading} onClick={prepareCheckout}>{checkoutLoading ? "Preparing…" : checkout ? "Checkout ready ✓" : "Confirm & prepare checkout"}</button>{checkout && <div className="checkout-result"><p>{checkout.message}</p>{checkout.checkoutUrl && <a href={checkout.checkoutUrl} target="_blank" rel="noreferrer">Open Razorpay test checkout →</a>}</div>}</div>
         </aside>
       </div>
@@ -409,7 +410,13 @@ export function LocalShopWorkspace() {
   }
 
   function renderCatalogue() {
-    return <section className="admin-view"><div className="view-toolbar"><div><h2>Product catalogue</h2><p>Stock changes immediately affect recommendations and checkout validation.</p></div><button className="primary-action" type="button" onClick={() => setShowProductForm((value) => !value)}>{showProductForm ? "Close form" : "+ Add product"}</button></div>{showProductForm && <form className="product-form" onSubmit={addProduct}><label>Product name<input required value={newProduct.name} onChange={(event) => setNewProduct({ ...newProduct, name: event.target.value })} /></label><label>Category<input required value={newProduct.category} onChange={(event) => setNewProduct({ ...newProduct, category: event.target.value })} /></label><label>Price (₹)<input required min="1" type="number" value={newProduct.price} onChange={(event) => setNewProduct({ ...newProduct, price: event.target.value })} /></label><label>Opening stock<input required min="0" type="number" value={newProduct.inventory} onChange={(event) => setNewProduct({ ...newProduct, inventory: event.target.value })} /></label><label className="wide-field">Description<input required value={newProduct.description} onChange={(event) => setNewProduct({ ...newProduct, description: event.target.value })} /></label><label className="wide-field">Image URL (optional)<input type="url" placeholder="https://…" value={newProduct.imageUrl} onChange={(event) => setNewProduct({ ...newProduct, imageUrl: event.target.value })} /></label><button type="submit">Save product</button></form>}{error && <div className="admin-error" role="alert">{error}</div>}{viewLoading ? <div className="view-loading">Loading catalogue…</div> : <div className="catalogue-grid">{catalogueProducts.map((product) => <article className="catalogue-card" key={product.id}><div className={`catalogue-swatch ${product.accent}`}>{product.imageUrl ? <img src={product.imageUrl} alt={product.name} loading="lazy" /> : null}<span>{product.category}</span><b>#{product.id}</b></div><div className="catalogue-copy"><div><h3>{product.name}</h3><strong>{formatPrice(product.price)}</strong></div><p>{product.description}</p><div className="catalogue-meta"><span>★ {product.rating}</span><span className={product.inventory < 10 ? "low-stock" : ""}>{product.inventory} units</span></div><div className="stock-control"><button type="button" onClick={() => adjustStock(product.id, -1)} disabled={product.inventory === 0}>−</button><strong>{product.inventory}</strong><button type="button" onClick={() => adjustStock(product.id, 1)}>+</button><span>Adjust stock</span></div></div></article>)}</div>}</section>;
+    return <section className="admin-view"><div className="view-toolbar"><div><h2>Product catalogue</h2><p>Stock changes immediately affect recommendations and checkout validation.</p></div><button className="primary-action" type="button" onClick={() => setShowProductForm((value) => !value)}>{showProductForm ? "Close form" : "+ Add product"}</button></div>{showProductForm && <form className="product-form" onSubmit={addProduct}><label>Product name<input required value={newProduct.name} onChange={(event) => setNewProduct({ ...newProduct, name: event.target.value })} /></label><label>Category<input required value={newProduct.category} onChange={(event) => setNewProduct({ ...newProduct, category: event.target.value })} /></label><label>Price (₹)<input required min="1" type="number" value={newProduct.price} onChange={(event) => setNewProduct({ ...newProduct, price: event.target.value })} /></label><label>Opening stock<input required min="0" type="number" value={newProduct.inventory} onChange={(event) => setNewProduct({ ...newProduct, inventory: event.target.value })} /></label><label className="wide-field">Description<input required value={newProduct.description} onChange={(event) => setNewProduct({ ...newProduct, description: event.target.value })} /></label><label className="wide-field">Image URL (optional)<input type="url" placeholder="https://…" value={newProduct.imageUrl} onChange={(event) => setNewProduct({ ...newProduct, imageUrl: event.target.value })} /></label><button type="submit">Save product</button></form>}{error && <div className="admin-error" role="alert">{error}</div>}{viewLoading ? <div className="view-loading">Loading catalogue…</div> : catalogueProducts.length === 0 ? (
+      <div className="empty-state">
+        <strong>Your catalogue is empty</strong>
+        <p>Add your first product to start selling through the AI assistant.</p>
+        <button type="button" onClick={() => setShowProductForm(true)}>Add your first product</button>
+      </div>
+    ) : <div className="catalogue-grid">{catalogueProducts.map((product) => <article className="catalogue-card" key={product.id}><div className={`catalogue-swatch ${product.accent}`}>{product.imageUrl ? <img src={product.imageUrl} alt={product.name} loading="lazy" /> : null}<span>{product.category}</span><b>#{product.id}</b></div><div className="catalogue-copy"><div><h3>{product.name}</h3><strong>{formatPrice(product.price)}</strong></div><p>{product.description}</p><div className="catalogue-meta"><span>★ {product.rating}</span><span className={product.inventory < 10 ? "low-stock" : ""}>{product.inventory} units</span></div><div className="stock-control"><button type="button" onClick={() => adjustStock(product.id, -1)} disabled={product.inventory === 0}>−</button><strong>{product.inventory}</strong><button type="button" onClick={() => adjustStock(product.id, 1)}>+</button><span>Adjust stock</span></div></div></article>)}</div>}</section>;
   }
 
   function renderOrders() {

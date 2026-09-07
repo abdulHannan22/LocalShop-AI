@@ -32,12 +32,11 @@ model User {
 
   @@map("users")
 }
-
 model Membership {
   id         String   @id
   merchantId String   @map("merchant_id")
   userId     String?  @map("user_id")
-  email      String
+  email      String   @unique
   role       String
   status     String   @default("invited")
   invitedBy  String?  @map("invited_by")
@@ -45,7 +44,6 @@ model Membership {
 
   merchant Merchant @relation(fields: [merchantId], references: [id])
 
-  @@unique([merchantId, email], map: "membership_merchant_email_idx")
   @@index([userId], map: "membership_user_idx")
   @@map("memberships")
 }

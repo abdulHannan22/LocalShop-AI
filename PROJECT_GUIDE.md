@@ -40,15 +40,19 @@ invent catalogue items, alter stock, set prices or create a payment by itself.
 
 ## 3. Tenant and identity architecture
 
-Hosted identity is read from verified `oai-authenticated-user-*` request
-headers. Local development uses `DEV_USER_EMAIL` and `DEV_USER_NAME`. Identity
+Merchant identity is normally established through the database-backed
+email/password session cookie. Customer identity uses password or OTP session
+cookies. A separate hosted deployment can provide verified
+`oai-authenticated-user-*` request headers for the platform identity path.
+`DEV_*` values are local-development compatibility settings only. Identity
 resolution occurs only on protected merchant/admin routes; public storefront
 requests resolve a store slug without provisioning a staff account.
 
-The first authenticated identity in a new owner-restricted deployment
-bootstraps the demo tenant owner and platform administrator. For a broader
-deployment, set `PLATFORM_ADMIN_EMAILS` before opening access and provision
-public customer identity through a managed provider at the edge.
+Create the first merchant owner through the signup flow. Set
+`PLATFORM_ADMIN_EMAILS` before opening a deployment to identify platform
+administrators. Configure `CUSTOMER_SESSION_SECRET` and
+`MERCHANT_SESSION_SECRET` as stable, high-entropy production secrets; changing
+either one invalidates the corresponding sessions.
 
 ### Roles and permissions
 
@@ -171,6 +175,17 @@ tests/                            production-render smoke test
 ```
 
 ## 10. Go-live checklist
+
+Before deploying a release:
+
+- run `npm ci`, `npm run db:migrate`, `npm run build:portable`, and `npm test`;
+- configure `DATABASE_URL` and, when needed, `DIRECT_DATABASE_URL` in the
+  hosting secret store;
+- start the service with `npm run start` behind HTTPS;
+- configure `PLATFORM_ADMIN_EMAILS` and both session secrets;
+- set the Razorpay webhook to `/api/webhooks/razorpay` on the public domain and
+  verify one signed test event;
+- confirm backups and a migration rollback/restore procedure before live data.
 
 The code is a production-oriented MVP. A real commercial launch still needs:
 

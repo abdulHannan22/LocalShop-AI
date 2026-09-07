@@ -124,3 +124,11 @@ export async function updateCheckoutStatusBySession(sessionId: string, status: s
   if (result.count === 0) return null;
   return prisma.checkoutEvent.findFirst({ where: { sessionId, merchantId } });
 }
+
+export async function updateCheckoutStatusByProviderReference(providerReference: string, status: string) {
+  const result = await prisma.checkoutEvent.updateMany({
+    where: { providerReference },
+    data: { status },
+  });
+  return result.count;
+}

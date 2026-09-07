@@ -21,12 +21,26 @@ export async function POST(request: Request) {
   if (!EMAIL_PATTERN.test(email)) return Response.json({ error: "Enter a valid email address." }, { status: 400 });
   if (password.length < 8) return Response.json({ error: "Password must be at least 8 characters." }, { status: 400 });
 
-  const result = await signUpMerchant({ storeName, slug, ownerName, email, password });
-  if ("error" in result) return Response.json({ error: result.error }, { status: 409 });
+  try {
+    const result = await signUpMerchant({ storeName, slug, ownerName, email, password });
+    if ("error" in result) return Response.json({ error: result.error }, { status: 409 });
 
-  const { token, maxAge } = await signMerchantSession(result.userId);
-  return Response.json(
-    { merchantId: result.merchantId, slug: result.slug },
-    { headers: { "Set-Cookie": merchantSessionCookieHeader(token, maxAge) } },
-  );
+    const { token, maxAge } = await signMerchantSession(result.userId, email, result.merchantId);
+    return Response.json(
+      { merchantId: result.merchantId, slug: result.slug },
+      { headers: { "Set-Cookie": merchantSessionCookieHeader(token, maxAge) } },
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : "";
+    console.error("Signup error:", {
+      message: errorMessage,
+      stack: errorStack,
+      error: error,
+    });
+    return Response.json({ 
+      error: "An error occurred during sign up. Please try again.",
+      ...(process.env.NODE_ENV !== "production" && { debug: errorMessage })
+    }, { status: 500 });
+  }
 }

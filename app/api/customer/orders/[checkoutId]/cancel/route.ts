@@ -3,13 +3,13 @@ import { updateCheckoutStatusForCustomer } from "../../../../../../lib/audit-sto
 
 const CANCELLABLE_STATUSES = ["ready", "created", "paid", "packed"];
 
-export async function POST(request: Request, { params }: { params: { checkoutId: string } }) {
+export async function POST(request: Request, context: { params: Promise<{ checkoutId: string }> }) {
   const customer = await resolveCustomer(request);
   if (!customer) {
     return Response.json({ error: "Sign in to cancel orders." }, { status: 401 });
   }
 
-  const { checkoutId } = params;
+  const { checkoutId } = await context.params;
   const { prisma } = await import("../../../../../../lib/prisma");
   const order = await prisma.checkoutEvent.findFirst({ where: { checkoutId, customerId: customer.id } });
 

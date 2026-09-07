@@ -50,6 +50,59 @@ export const catalog: CatalogProduct[] = [
   { id: 20, name: "ScreenShield 15", category: "Screen protector", price: 349, rating: 4.3, inventory: 28, description: "Anti-glare tempered glass screen protector for 15-inch laptops.", tags: ["screen", "laptop", "accessory", "study", "gift"], accent: "violet" },
 ];
 
+const demoProduct = (
+  id: number,
+  name: string,
+  category: string,
+  price: number,
+  description: string,
+  tags: string[],
+  accent: string,
+): CatalogProduct => ({ id, name, category, price, rating: 4.6, inventory: 18, description, tags, accent });
+
+export const demoStoreCatalogs: Record<string, CatalogProduct[]> = {
+  merchant_nova: [
+    demoProduct(1, "Everyday Cotton Tee", "Clothing", 599, "Soft breathable cotton tee for everyday wear.", ["clothing", "cotton", "casual"], "lime"),
+    demoProduct(2, "Relaxed Denim Jacket", "Clothing", 2199, "Layer-ready denim jacket with a relaxed fit.", ["clothing", "denim", "jacket"], "blue"),
+    demoProduct(3, "Stretch Chino Pants", "Clothing", 1499, "Comfort stretch chinos for office or weekend plans.", ["clothing", "chinos", "office"], "orange"),
+    demoProduct(4, "Knit Polo Shirt", "Clothing", 899, "Smart-casual textured polo in soft knit fabric.", ["clothing", "polo", "smart casual"], "violet"),
+    demoProduct(5, "Lightweight Hoodie", "Clothing", 1299, "Warm fleece hoodie with a clean everyday silhouette.", ["clothing", "hoodie", "winter"], "blue"),
+    demoProduct(6, "Canvas Crossbody Bag", "Accessories", 749, "Hands-free canvas bag for daily essentials.", ["accessories", "bag", "casual"], "lime"),
+  ],
+  merchant_spark: [
+    demoProduct(1, "Minimal Hoop Earrings", "Jewellery", 499, "Polished lightweight hoops for daily styling.", ["jewellery", "earrings", "minimal"], "violet"),
+    demoProduct(2, "Leather Card Holder", "Wallets", 699, "Slim genuine-leather card holder with five slots.", ["wallet", "leather", "accessories"], "orange"),
+    demoProduct(3, "Polarised Aviators", "Eyewear", 899, "UV-protected polarised sunglasses with metal frames.", ["eyewear", "sunglasses", "summer"], "blue"),
+    demoProduct(4, "Silk Print Scarf", "Scarves", 799, "Lightweight printed scarf to elevate simple outfits.", ["scarf", "fashion", "gift"], "lime"),
+    demoProduct(5, "Classic Leather Belt", "Belts", 649, "Durable leather belt with a brushed metal buckle.", ["belt", "leather", "formal"], "orange"),
+    demoProduct(6, "Everyday Watch", "Watches", 1599, "Clean analogue watch with a comfortable vegan strap.", ["watch", "accessories", "formal"], "violet"),
+  ],
+  merchant_zenith: [
+    demoProduct(1, "The Midnight Library", "Fiction", 399, "A thoughtful contemporary novel for quiet evenings.", ["book", "fiction", "reading"], "blue"),
+    demoProduct(2, "Atomic Habits", "Self-help", 499, "A practical guide to building better daily routines.", ["book", "habits", "productivity"], "lime"),
+    demoProduct(3, "The Illustrated Space Atlas", "Children's Books", 699, "A colourful introduction to planets and space exploration.", ["book", "science", "children"], "orange"),
+    demoProduct(4, "Indian Cooking at Home", "Cookbooks", 549, "Approachable recipes for comforting Indian home meals.", ["book", "cooking", "recipes"], "violet"),
+    demoProduct(5, "The Complete Short Stories", "Classics", 449, "A curated collection of unforgettable short fiction.", ["book", "classics", "literature"], "blue"),
+    demoProduct(6, "Hardcover Reading Journal", "Stationery", 299, "A guided journal for notes, quotes and reading lists.", ["stationery", "journal", "gift"], "lime"),
+  ],
+  merchant_pixel: [
+    demoProduct(1, "Handwoven Cotton Rug", "Textiles", 1799, "Soft handwoven rug with a calm geometric pattern.", ["home", "rug", "handmade"], "orange"),
+    demoProduct(2, "Ceramic Table Vase", "Decor", 699, "Minimal glazed ceramic vase for flowers or branches.", ["home", "ceramic", "decor"], "blue"),
+    demoProduct(3, "Scented Soy Candle Set", "Lighting", 599, "Three hand-poured soy candles with warm fragrances.", ["home", "candle", "aromatherapy"], "violet"),
+    demoProduct(4, "Rattan Storage Basket", "Storage", 749, "Handwoven basket for blankets, toys or laundry.", ["home", "storage", "rattan"], "lime"),
+    demoProduct(5, "Linen Cushion Cover", "Soft Furnishings", 399, "Textured linen cover with a concealed zip.", ["home", "cushion", "linen"], "orange"),
+    demoProduct(6, "Wooden Wall Shelf", "Furniture", 1199, "Floating wooden shelf for books and small objects.", ["home", "wood", "shelf"], "blue"),
+  ],
+  merchant_orbit: [
+    demoProduct(1, "Breathable Running Tee", "Running", 799, "Moisture-wicking tee for comfortable daily runs.", ["sports", "running", "moisture wicking"], "lime"),
+    demoProduct(2, "Trail Running Shoes", "Footwear", 2499, "Grippy lightweight shoes for road and trail sessions.", ["sports", "shoes", "running"], "blue"),
+    demoProduct(3, "Adjustable Yoga Mat", "Yoga", 999, "Cushioned non-slip mat for home or studio practice.", ["sports", "yoga", "fitness"], "violet"),
+    demoProduct(4, "Insulated Steel Bottle", "Hydration", 699, "750ml bottle that keeps drinks cool through training.", ["sports", "bottle", "hydration"], "orange"),
+    demoProduct(5, "Resistance Band Set", "Strength Training", 599, "Five resistance levels for full-body workouts.", ["sports", "fitness", "strength"], "blue"),
+    demoProduct(6, "Compact Gym Duffel", "Bags", 1299, "Ventilated duffel with shoe compartment and wet pocket.", ["sports", "bag", "gym"], "lime"),
+  ],
+};
+
 const knownFeatures = [
   "wireless",
   "microphone",

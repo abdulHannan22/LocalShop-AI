@@ -26,6 +26,7 @@ export async function POST(request: Request) {
     );
   } catch (err) {
     console.error("register error", err);
-    return Response.json({ error: "Registration failed. Please try again." }, { status: 500 });
+    const detail = err instanceof Error ? err.message : "Unknown registration error";
+    return Response.json({ error: process.env.NODE_ENV === "production" ? "Registration failed. Please try again." : `Registration failed: ${detail}` }, { status: 500 });
   }
 }

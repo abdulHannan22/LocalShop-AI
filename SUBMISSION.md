@@ -194,7 +194,7 @@ why the system recommended or executed an action.
 
 **Solution:** Intent extraction, ranking, inventory checks, confirmation,
 checkout creation and webhook processing generate named audit events stored in
-Cloudflare D1 when available.
+the tenant-scoped Neon Postgres database.
 
 ## Evaluation metrics
 

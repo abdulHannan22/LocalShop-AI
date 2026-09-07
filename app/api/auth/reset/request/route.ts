@@ -15,12 +15,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "Enter a valid email address." }, { status: 400 });
   }
 
-  const result = await requestPasswordReset(email);
+  try {
+    const result = await requestPasswordReset(email);
 
-  return Response.json({
-    message: result.devCode
-      ? "If an account exists for that email, a reset code has been sent. (Local demo mode: shown directly below since no email provider is configured.)"
-      : "If an account exists for that email, a reset code has been sent.",
-    devCode: result.devCode,
-  });
+    return Response.json({
+      message: result.devCode
+        ? "If an account exists for that email, a reset code has been sent. (Local demo mode: shown directly below since no email provider is configured.)"
+        : "If an account exists for that email, a reset code has been sent.",
+      devCode: result.devCode,
+    });
+  } catch (error) {
+    console.error("Password reset request error:", error);
+    return Response.json({ error: "An error occurred. Please try again." }, { status: 500 });
+  }
 }

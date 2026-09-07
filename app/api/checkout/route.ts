@@ -1,15 +1,16 @@
 import { saveAudit, saveCheckout } from "../../../lib/audit-store";
 import { getStoredProduct } from "../../../lib/product-store";
+import { prisma } from "../../../lib/prisma";
 import { getRuntimeValue } from "../../../lib/runtime-env";
 import { getActor, resolveMerchantBySlug } from "../../../lib/authz";
 import { resolveCustomer } from "../../../lib/customer-auth";
 
 type CartItem = { productId: number; quantity: number };
 
-type RazorpayPaymentLink = {
+type RazorpayOrder = {
   id?: string;
-  short_url?: string;
-  status?: string;
+  amount?: number;
+  currency?: string;
   error?: { description?: string };
 };
 
@@ -31,8 +32,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const sessionId = payload.sessionId?.trim() ?? "";
-  if (!sessionId) return Response.json({ error: "A valid session is required." }, { status: 400 });
+  const sessionId = payload.sessionId?.trim() || `checkout_${crypto.randomUUID()}`;
   if (payload.confirmed !== true) {
     return Response.json({ error: "Customer confirmation is required before checkout." }, { status: 409 });
   }
@@ -124,12 +124,12 @@ export async function POST(request: Request) {
     });
   }
 
-  const referenceId = `lsa_${Date.now()}`.slice(0, 40);
+  const receipt = `lsa_${Date.now()}`.slice(0, 40);
   const description = resolvedItems.length === 1
     ? `LocalShop AI order: ${resolvedItems[0].product!.name}`
     : `LocalShop AI order: ${resolvedItems.length} items`;
 
-  const response = await fetch("https://api.razorpay.com/v1/payment_links/", {
+  const response = await fetch("https://api.razorpay.com/v1/orders", {
     method: "POST",
     headers: {
       Authorization: `Basic ${btoa(`${keyId}:${keySecret}`)}`,
@@ -138,21 +138,18 @@ export async function POST(request: Request) {
     body: JSON.stringify({
       amount: totalAmountPaise,
       currency: "INR",
-      accept_partial: false,
-      reference_id: referenceId,
-      description,
-      reminder_enable: false,
+      receipt,
       notes: { merchant_id: merchant.id, localshop_session: sessionId },
     }),
   });
 
-  const paymentLink = (await response.json()) as RazorpayPaymentLink;
-  if (!response.ok || !paymentLink.short_url || !paymentLink.id) {
+  const razorpayOrder = (await response.json()) as RazorpayOrder;
+  if (!response.ok || !razorpayOrder.id) {
     await saveAudit({
       merchantId: merchant.id,
       sessionId,
       eventType: "checkout.failed",
-      detail: paymentLink.error?.description ?? `Razorpay returned ${response.status}`,
+      detail: razorpayOrder.error?.description ?? `Razorpay returned ${response.status}`,
       engine: "razorpay",
     });
     return Response.json(
@@ -161,20 +158,31 @@ export async function POST(request: Request) {
     );
   }
 
+  await Promise.all(resolvedItems.map(({ item }) =>
+    prisma.checkoutEvent.updateMany({
+      where: { checkoutId: { in: checkoutIds }, productId: item.productId },
+      data: { providerReference: razorpayOrder.id, status: "created" },
+    }),
+  ));
+
   await saveAudit({
     merchantId: merchant.id,
     sessionId,
     eventType: "checkout.created",
-    detail: `Razorpay test Payment Link ${paymentLink.id} created for ${resolvedItems.length} item(s)`,
+    detail: `Razorpay order ${razorpayOrder.id} created for ${resolvedItems.length} item(s)`,
     engine: "razorpay",
   });
 
   return Response.json({
     checkoutId: checkoutIds[0],
     orderNumber,
-    mode: "razorpay-test",
-    status: paymentLink.status ?? "created",
-    checkoutUrl: paymentLink.short_url,
-    message: "Razorpay test Payment Link created successfully.",
+    mode: "razorpay",
+    status: "created",
+    razorpayOrderId: razorpayOrder.id,
+    razorpayKeyId: keyId,
+    amount: totalAmountPaise,
+    currency: "INR",
+    checkoutUrl: null,
+    message: "Razorpay order created. Complete payment to confirm your order.",
   });
 }

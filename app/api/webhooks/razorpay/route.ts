@@ -1,4 +1,4 @@
-import { hasAuditEvent, saveAudit, updateCheckoutStatusBySession } from "../../../../lib/audit-store";
+import { hasAuditEvent, saveAudit, updateCheckoutStatusByProviderReference, updateCheckoutStatusBySession } from "../../../../lib/audit-store";
 import { DEMO_MERCHANT_ID } from "../../../../lib/authz";
 import { getRuntimeValue } from "../../../../lib/runtime-env";
 
@@ -55,6 +55,19 @@ function findMerchantId(payload: Record<string, unknown> | undefined) {
   }
 }
 
+function findOrderId(payload: Record<string, unknown> | undefined) {
+  try {
+    const payment = payload?.payment as Record<string, unknown>;
+    const entity = payment.entity as Record<string, unknown>;
+    if (entity.order_id) return String(entity.order_id);
+    const order = payload?.order as Record<string, unknown>;
+    const orderEntity = order.entity as Record<string, unknown>;
+    return String(orderEntity.id || "");
+  } catch {
+    return "";
+  }
+}
+
 export async function POST(request: Request) {
   const secret = getRuntimeValue("RAZORPAY_WEBHOOK_SECRET");
   if (!secret) {
@@ -83,6 +96,10 @@ export async function POST(request: Request) {
   const sessionId = findSessionId(event.payload);
   if (event.event === "payment_link.paid") {
     await updateCheckoutStatusBySession(sessionId, "paid", merchantId);
+  }
+  if (event.event === "payment.captured" || event.event === "order.paid") {
+    const orderId = findOrderId(event.payload);
+    if (orderId) await updateCheckoutStatusByProviderReference(orderId, "paid");
   }
   await saveAudit({
     eventId: eventId || crypto.randomUUID(),

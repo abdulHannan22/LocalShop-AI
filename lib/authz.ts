@@ -130,8 +130,10 @@ export async function listStaff(actor: Actor) {
 export async function inviteStaff(actor: Actor, email: string, role: MerchantRole) {
   if (!actor.merchantId) return null;
   const normalized = email.trim().toLowerCase();
+  const existing = await prisma.membership.findUnique({ where: { email: normalized } });
+  if (existing && existing.merchantId !== actor.merchantId) return null;
   return prisma.membership.upsert({
-    where: { merchantId_email: { merchantId: actor.merchantId, email: normalized } },
+    where: { email: normalized },
     update: { role, status: "invited", invitedBy: actor.userId },
     create: { id: crypto.randomUUID(), merchantId: actor.merchantId, email: normalized, role, status: "invited", invitedBy: actor.userId },
   });

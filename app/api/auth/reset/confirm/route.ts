@@ -18,8 +18,19 @@ export async function POST(request: Request) {
     return Response.json({ error: "Password must be at least 8 characters." }, { status: 400 });
   }
 
-  const result = await resetMerchantPassword(email, code, newPassword);
-  if ("error" in result) return Response.json({ error: result.error }, { status: 400 });
+  try {
+    const result = await resetMerchantPassword(email, code, newPassword);
+    if ("error" in result) return Response.json({ error: result.error }, { status: 400 });
 
-  return Response.json({ ok: true });
+    return Response.json({ ok: true });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : "";
+    console.error("Password reset confirm error:", {
+      message: errorMessage,
+      stack: errorStack,
+      error: error,
+    });
+    return Response.json({ error: "An error occurred. Please try again." }, { status: 500 });
+  }
 }

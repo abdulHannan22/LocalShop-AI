@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { catalog, type CatalogProduct } from "./catalog";
+import { catalog, demoStoreCatalogs, type CatalogProduct } from "./catalog";
 import { DEMO_MERCHANT_ID, DEMO_MERCHANTS } from "./authz";
 
 type ProductInput = Omit<CatalogProduct, "id">;
@@ -29,9 +29,14 @@ function rowToProduct(row: {
 async function seedIfEmpty(merchantId: string) {
   const isDemoMerchant = DEMO_MERCHANTS.some((m) => m.id === merchantId);
   if (!isDemoMerchant) return;
+  const seedCatalog = demoStoreCatalogs[merchantId] ?? catalog;
   const count = await prisma.product.count({ where: { merchantId } });
-  if (count > 0) return;
-  // Each demo store gets all 20 catalog products (prices vary slightly per store)
+  if (count > 0) {
+    const expectedProduct = await prisma.product.findFirst({ where: { merchantId, name: seedCatalog[0]?.name }, select: { id: true } });
+    if (expectedProduct) return;
+    await prisma.product.deleteMany({ where: { merchantId } });
+  }
+  // Demo stores intentionally have different catalogues so shoppers can compare store types.
   const priceMultiplier: Record<string, number> = {
     merchant_nova: 1.0,
     merchant_spark: 0.95,
@@ -41,7 +46,7 @@ async function seedIfEmpty(merchantId: string) {
   };
   const mult = priceMultiplier[merchantId] ?? 1.0;
   await prisma.product.createMany({
-    data: catalog.map(({ id: _id, ...product }) => ({
+    data: seedCatalog.map(({ id: _id, ...product }) => ({
       ...product,
       price: Math.round(product.price * mult),
       merchantId,
