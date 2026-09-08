@@ -1,6 +1,11 @@
 import { loginCustomer, signCustomerSession, customerSessionCookieHeader } from "../../../../../lib/customer-auth";
+import { checkRateLimit, clientIp, rateLimitResponse } from "../../../../../lib/rate-limit";
+import { errorResponse } from "../../../../../lib/api-errors";
 
 export async function POST(request: Request) {
+  const rateLimit = checkRateLimit(clientIp(request), "login");
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfterSeconds);
+
   try {
     let payload: { email?: string; password?: string };
     try {
@@ -22,7 +27,6 @@ export async function POST(request: Request) {
       { headers: { "Set-Cookie": customerSessionCookieHeader(token, maxAge) } },
     );
   } catch (err) {
-    console.error("login error", err);
-    return Response.json({ error: "Sign in failed. Please try again." }, { status: 500 });
+    return errorResponse(err, "customer-login", "Sign in failed. Please try again in a few moments.");
   }
 }

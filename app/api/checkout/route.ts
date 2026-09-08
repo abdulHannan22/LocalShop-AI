@@ -4,6 +4,8 @@ import { prisma } from "../../../lib/prisma";
 import { getRuntimeValue } from "../../../lib/runtime-env";
 import { getActor, resolveMerchantBySlug } from "../../../lib/authz";
 import { resolveCustomer } from "../../../lib/customer-auth";
+import { checkRateLimit, clientIp, rateLimitResponse } from "../../../lib/rate-limit";
+import { errorResponse } from "../../../lib/api-errors";
 
 type CartItem = { productId: number; quantity: number };
 
@@ -15,6 +17,9 @@ type RazorpayOrder = {
 };
 
 export async function POST(request: Request) {
+  const rateLimit = checkRateLimit(clientIp(request), "checkout");
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfterSeconds);
+
   let payload: {
     sessionId?: string;
     // Single product (legacy)
@@ -45,6 +50,8 @@ export async function POST(request: Request) {
       : [];
 
   if (!cartItems.length) return Response.json({ error: "Cart is empty." }, { status: 400 });
+
+  try {
   for (const item of cartItems) {
     if (!Number.isInteger(item.productId) || item.quantity < 1) {
       return Response.json({ error: "Each cart item needs a valid productId and quantity ≥ 1." }, { status: 400 });
@@ -139,6 +146,7 @@ export async function POST(request: Request) {
       amount: totalAmountPaise,
       currency: "INR",
       receipt,
+      description,
       notes: { merchant_id: merchant.id, localshop_session: sessionId },
     }),
   });
@@ -153,7 +161,7 @@ export async function POST(request: Request) {
       engine: "razorpay",
     });
     return Response.json(
-      { error: "Razorpay test checkout could not be created. Verify the test keys and account configuration." },
+      { error: "We couldn't start the payment right now. Please try again in a few moments." },
       { status: 502 },
     );
   }
@@ -185,4 +193,7 @@ export async function POST(request: Request) {
     checkoutUrl: null,
     message: "Razorpay order created. Complete payment to confirm your order.",
   });
+  } catch (error) {
+    return errorResponse(error, "checkout", "We couldn't create your checkout right now. Please try again in a few moments.");
+  }
 }

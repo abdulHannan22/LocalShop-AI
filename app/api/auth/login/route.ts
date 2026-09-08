@@ -1,6 +1,10 @@
 import { merchantSessionCookieHeader, signInMerchant, signMerchantSession } from "../../../../lib/merchant-auth";
+import { checkRateLimit, clientIp, rateLimitResponse } from "../../../../lib/rate-limit";
 
 export async function POST(request: Request) {
+  const rateLimit = checkRateLimit(clientIp(request), "login");
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfterSeconds);
+
   let payload: { email?: string; password?: string };
   try {
     payload = (await request.json()) as typeof payload;

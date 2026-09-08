@@ -48,6 +48,9 @@ async function sha256(value: string) {
 }
 
 async function identityFromRequest(request: Request) {
+  // Production identity: verified merchant session first, then hosted
+  // platform headers. There is deliberately no local dev-identity fallback —
+  // unauthenticated requests are rejected on protected routes.
   const sessionIdentity = await resolveMerchantSessionIdentity(request);
   if (sessionIdentity) return sessionIdentity;
 
@@ -58,10 +61,6 @@ async function identityFromRequest(request: Request) {
     try { name = decodeURIComponent(encodedName); } catch { /* use email fallback */ }
   }
   if (emailHeader) return { email: emailHeader, name };
-  if (process.env.NODE_ENV !== "production" && getRuntimeValue("DEV_AUTOLOGIN") === "true") {
-    const email = (getRuntimeValue("DEV_USER_EMAIL") ?? "owner@nova.local").toLowerCase();
-    return { email, name: getRuntimeValue("DEV_USER_NAME") ?? "Nova Store Owner" };
-  }
   return null;
 }
 

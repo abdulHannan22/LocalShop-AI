@@ -1,11 +1,16 @@
 import { updateCheckoutStatusByProviderReference } from "../../../../lib/audit-store";
 import { getRuntimeValue } from "../../../../lib/runtime-env";
+import { checkRateLimit, clientIp, rateLimitResponse } from "../../../../lib/rate-limit";
+import { errorResponse } from "../../../../lib/api-errors";
 
 function toHex(buffer: ArrayBuffer) {
   return Array.from(new Uint8Array(buffer)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export async function POST(request: Request) {
+  const rateLimit = checkRateLimit(clientIp(request), "checkout");
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfterSeconds);
+
   let body: { razorpay_order_id?: string; razorpay_payment_id?: string; razorpay_signature?: string };
   try {
     body = await request.json() as typeof body;
@@ -27,7 +32,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "Razorpay payment signature is invalid." }, { status: 400 });
   }
 
-  const updated = await updateCheckoutStatusByProviderReference(orderId, "paid");
-  if (!updated) return Response.json({ error: "Checkout order was not found." }, { status: 404 });
-  return Response.json({ verified: true, status: "paid" });
+  try {
+    const updated = await updateCheckoutStatusByProviderReference(orderId, "paid");
+    if (!updated) return Response.json({ error: "We couldn't find this order. Please contact the store for help." }, { status: 404 });
+    return Response.json({ verified: true, status: "paid" });
+  } catch (error) {
+    return errorResponse(error, "checkout-verify", "We couldn't verify your payment right now. Please try again in a few moments.");
+  }
 }

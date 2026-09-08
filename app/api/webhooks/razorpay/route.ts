@@ -1,6 +1,8 @@
 import { hasAuditEvent, saveAudit, updateCheckoutStatusByProviderReference, updateCheckoutStatusBySession } from "../../../../lib/audit-store";
 import { DEMO_MERCHANT_ID } from "../../../../lib/authz";
 import { getRuntimeValue } from "../../../../lib/runtime-env";
+import { checkRateLimit, clientIp, rateLimitResponse } from "../../../../lib/rate-limit";
+import { errorResponse } from "../../../../lib/api-errors";
 
 function toHex(buffer: ArrayBuffer) {
   return Array.from(new Uint8Array(buffer))
@@ -69,6 +71,9 @@ function findOrderId(payload: Record<string, unknown> | undefined) {
 }
 
 export async function POST(request: Request) {
+  const rateLimit = checkRateLimit(clientIp(request), "webhook");
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfterSeconds);
+
   const secret = getRuntimeValue("RAZORPAY_WEBHOOK_SECRET");
   if (!secret) {
     return Response.json({ error: "Webhook secret is not configured." }, { status: 503 });
@@ -94,14 +99,15 @@ export async function POST(request: Request) {
 
   const merchantId = findMerchantId(event.payload);
   const sessionId = findSessionId(event.payload);
-  if (event.event === "payment_link.paid") {
-    await updateCheckoutStatusBySession(sessionId, "paid", merchantId);
-  }
-  if (event.event === "payment.captured" || event.event === "order.paid") {
-    const orderId = findOrderId(event.payload);
-    if (orderId) await updateCheckoutStatusByProviderReference(orderId, "paid");
-  }
-  await saveAudit({
+  try {
+    if (event.event === "payment_link.paid") {
+      await updateCheckoutStatusBySession(sessionId, "paid", merchantId);
+    }
+    if (event.event === "payment.captured" || event.event === "order.paid") {
+      const orderId = findOrderId(event.payload);
+      if (orderId) await updateCheckoutStatusByProviderReference(orderId, "paid");
+    }
+    await saveAudit({
     eventId: eventId || crypto.randomUUID(),
     merchantId,
     sessionId,
@@ -109,5 +115,12 @@ export async function POST(request: Request) {
     detail: "Razorpay webhook signature verified and event accepted",
     engine: "razorpay",
   });
+  } catch (error) {
+    return errorResponse(error, "webhook", "We could not record this payment event. Razorpay will retry the delivery.");
+  }
   return Response.json({ accepted: true, duplicate: false });
+}
+
+export async function GET() {
+  return Response.json({ error: "Use POST to deliver Razorpay webhook events." }, { status: 405 });
 }

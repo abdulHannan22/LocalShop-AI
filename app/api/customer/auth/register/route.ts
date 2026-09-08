@@ -1,4 +1,5 @@
 import { registerCustomer, signCustomerSession, customerSessionCookieHeader } from "../../../../../lib/customer-auth";
+import { errorResponse } from "../../../../../lib/api-errors";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -25,8 +26,6 @@ export async function POST(request: Request) {
       { headers: { "Set-Cookie": customerSessionCookieHeader(token, maxAge) } },
     );
   } catch (err) {
-    console.error("register error", err);
-    const detail = err instanceof Error ? err.message : "Unknown registration error";
-    return Response.json({ error: process.env.NODE_ENV === "production" ? "Registration failed. Please try again." : `Registration failed: ${detail}` }, { status: 500 });
+    return errorResponse(err, "customer-register", "Registration failed. Please try again in a few moments.");
   }
 }

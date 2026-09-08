@@ -170,8 +170,11 @@ export async function signInMerchant(rawEmail: string, password: string) {
 // for a logged-in session. ---
 
 function sessionSecretKey() {
-  const secret = getRuntimeValue("MERCHANT_SESSION_SECRET") ?? "localshop-ai-dev-merchant-session-secret";
-  return new TextEncoder().encode(secret);
+  const secret = getRuntimeValue("MERCHANT_SESSION_SECRET");
+  if (!secret && process.env.NODE_ENV === "production") {
+    throw new Error("MERCHANT_SESSION_SECRET must be set in production. Refusing to sign sessions with a development fallback.");
+  }
+  return new TextEncoder().encode(secret ?? "localshop-ai-dev-merchant-session-secret");
 }
 
 export type MerchantSessionClaims = { sub: string; email: string; merchantId: string };

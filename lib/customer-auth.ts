@@ -122,8 +122,12 @@ export async function verifyCustomerOtp(rawEmail: string, code: string): Promise
 }
 
 async function hmacKey() {
-  const secret = getRuntimeValue("CUSTOMER_SESSION_SECRET") ?? "localshop-ai-dev-session-secret";
-  return crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+  const secret = getRuntimeValue("CUSTOMER_SESSION_SECRET");
+  if (!secret && process.env.NODE_ENV === "production") {
+    throw new Error("CUSTOMER_SESSION_SECRET must be set in production. Refusing to sign sessions with a development fallback.");
+  }
+  const keyMaterial = secret ?? "localshop-ai-dev-session-secret";
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(keyMaterial), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 
 export async function signCustomerSession(customerId: string) {

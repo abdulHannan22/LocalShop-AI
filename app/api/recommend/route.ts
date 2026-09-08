@@ -5,8 +5,13 @@ import { listProducts } from "../../../lib/product-store";
 import { getActor, resolveMerchantBySlug } from "../../../lib/authz";
 import { getRuntimeValue } from "../../../lib/runtime-env";
 import { saveShoppingSession } from "../../../lib/session-store";
+import { checkRateLimit, clientIp, rateLimitResponse } from "../../../lib/rate-limit";
+import { errorResponse } from "../../../lib/api-errors";
 
 export async function POST(request: Request) {
+  const rateLimit = checkRateLimit(clientIp(request), "recommend");
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfterSeconds);
+
   let payload: { query?: string; storeSlug?: string; customerEmail?: string };
   try {
     payload = (await request.json()) as typeof payload;
@@ -22,6 +27,7 @@ export async function POST(request: Request) {
     );
   }
 
+  try {
   const sessionId = crypto.randomUUID();
   const actor = payload.storeSlug ? null : await getActor(request);
   const merchant = payload.storeSlug
@@ -96,4 +102,7 @@ export async function POST(request: Request) {
   });
 
   return Response.json({ sessionId, query, intent, engine, products, matchQuality, audit });
+  } catch (error) {
+    return errorResponse(error, "recommend", "We couldn't process your request right now. Please try again in a few moments.");
+  }
 }
